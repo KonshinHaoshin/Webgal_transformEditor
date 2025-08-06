@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import './transform-editor.css';
 
 interface TransformData {
+    type: 'setTransform' | 'changeFigure';
     target: string;
     duration: number;
     transform: {
@@ -9,7 +10,10 @@ interface TransformData {
         scale: { x: number; y: number };
         [key: string]: any;
     };
+    path?: string; // 对于 changeFigure，保存路径
+    extraParams?: Record<string, string>; // 保存 motion / expression 等
 }
+
 
 export default function TransformEditor() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -61,55 +65,82 @@ export default function TransformEditor() {
 
 
     const parseScript = (script: string): TransformData[] => {
-        const lines = script.split(";").filter((line) => line.includes("setTransform:"));
+        const lines = script.split(";").map(line => line.trim()).filter(Boolean);
+
         return lines.map((line) => {
-            const [jsonPart, ...rest] = line.split(" -");
-            const jsonStr = jsonPart.replace("setTransform:", "").trim();
-            const params = Object.fromEntries(
-                rest.map((s) => {
-                    const [k, v] = s.split("=");
-                    return [k?.trim(), v?.trim()];
-                }).filter(([k, v]) => k && v)
-            );
-            try {
+            const [command, ...rest] = line.split(" -");
+
+            if (command.startsWith("setTransform:")) {
+                const jsonStr = command.replace("setTransform:", "").trim();
+                const params = Object.fromEntries(rest.map(s => s.split("=").map(v => v.trim())));
+
                 const json = JSON.parse(jsonStr);
-                let initScale = json.scale || { x: 1, y: 1 };
-                if (params.target === "bg-main" && bgImg) {
-                    const bgW = bgImg.width;
-                    const bgH = bgImg.height;
-                    const scaleCover = Math.max(canvasWidth / bgW, canvasHeight / bgH);
+                const transform: any = {
+                    ...json,
+                    position: {
+                        x: (json.position?.x ?? 0) * scaleX,
+                        y: (json.position?.y ?? 0) * scaleY
+                    },
+                    scale: json.scale || { x: 1, y: 1 },
+                };
 
-                    // 记录真实缩放倍数（供绘制时使用），但transform.scale本身仍设为{1,1}
-                    bgBaseScaleRef.current = {
-                        x: scaleCover / scaleX,
-                        y: scaleCover / scaleY
-                    };
-
-                    initScale = { x: 1, y: 1 };
-                }
                 return {
-
+                    type: "setTransform",
                     target: params.target,
                     duration: parseInt(params.duration || "500"),
-
-                    transform: {
-                        ...json,
-                        position: {
-                            x: (json.position?.x ?? 0) * scaleX,
-                            y: (json.position?.y ?? 0) * scaleY
-                        },
-                        scale: initScale,
-                    },
-                };
-            } catch (err) {
-                console.error("❌ JSON parse failed:", err);
-                alert("⚠️ 无法解析 JSON，请检查格式！");
-                return {
-                    target: "invalid",
-                    duration: 0,
-                    transform: { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } }
+                    transform
                 };
             }
+
+            if (command.startsWith("changeFigure:")) {
+                const path = command.replace("changeFigure:", "").trim();
+
+                const params: Record<string, string> = {};
+                let transform: any = { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } };
+
+                for (const part of rest) {
+                    const [k, v] = part.split("=").map((s) => s?.trim());
+                    if (k === "transform") {
+                        try {
+                            const json = JSON.parse(v);
+                            transform = {
+                                ...json,
+                                position: {
+                                    x: (json.position?.x ?? 0) * scaleX,
+                                    y: (json.position?.y ?? 0) * scaleY
+                                },
+                                scale: json.scale || { x: 1, y: 1 },
+                            };
+                        } catch (err) {
+                            console.warn("❌ 解析 transform JSON 失败:", v);
+                        }
+                    } else if (k && v) {
+                        params[k] = v;
+                    } else if (k && !v) {
+                        // 像 -next 这种无值参数
+                        params[k] = "";
+                    }
+                }
+
+                return {
+                    type: "changeFigure",
+                    path,
+                    target: params.id || "unknown",
+                    duration: 0,
+                    transform,
+                    extraParams: Object.fromEntries(
+                        Object.entries(params).filter(([k]) => k !== "id" && k !== "transform")
+                    )
+                };
+            }
+
+            alert("⚠️ 不支持的指令格式：" + line);
+            return {
+                type: "setTransform",
+                target: "invalid",
+                duration: 0,
+                transform: { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } }
+            };
         });
     };
 
@@ -204,22 +235,29 @@ export default function TransformEditor() {
         const scaleRatioX = baseWidth / canvasWidth;
         const scaleRatioY = baseHeight / canvasHeight;
 
-        return transforms
-            .map(({ target, transform }) => {
-                const originalTransform = {
-                    ...transform,
-                    position: {
-                        x: transform.position.x * scaleRatioX,
-                        y: transform.position.y * scaleRatioY
-                    }
-                };
+        return transforms.map(obj => {
+            const transform = {
+                ...obj.transform,
+                position: {
+                    x: obj.transform.position.x * scaleRatioX,
+                    y: obj.transform.position.y * scaleRatioY,
+                }
+            };
+            const roundedTransform = roundTransform(transform);
+            const transformJson = JSON.stringify(roundedTransform);
 
-                const roundedTransform = roundTransform(originalTransform);
+            if (obj.type === "setTransform") {
+                return `setTransform:${transformJson} -target=${obj.target} -duration=${exportDuration} -next;`;
+            }
 
-                const json = JSON.stringify(roundedTransform);
-                return `setTransform:${json} -target=${target} -duration=${exportDuration} -next;`;
-            })
-            .join("\n");
+            if (obj.type === "changeFigure") {
+                const extras = Object.entries(obj.extraParams || {})
+                    .map(([k, v]) => `-${k}=${v}`).join(" ");
+                return `changeFigure:${obj.path} -id=${obj.target} -transform=${transformJson} ${extras};`;
+            }
+
+            return "";
+        }).join("\n");
     };
 
     const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
