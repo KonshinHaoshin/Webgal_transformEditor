@@ -48,18 +48,14 @@ export default function TransformEditor() {
     const modelOriginalHeight = 1123;
 
     useEffect(() => {
-        const isDev = import.meta.env.MODE === 'development';
+        // const isDev = import.meta.env.MODE === 'development';
 
         const model = new Image();
-        model.src = isDev
-            ? '/assets/model.png'
-            : window.api.getAssetPath('model.png');
+        model.src = './assets/model.png';
         model.onload = () => setModelImg(model);
 
         const bg = new Image();
-        bg.src = isDev
-            ? '/assets/bg.png'
-            : window.api.getAssetPath('bg.png');
+        bg.src = './assets/bg.png';
         bg.onload = () => setBgImg(bg);
     }, []);
 

@@ -1,6 +1,11 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      window.addEventListener('error', function (e) {
+        document.body.innerHTML = "<h2>❌ 运行出错，可能是尝试在浏览器中打开了 Tauri 专属应用</h2>";
+      });
+    </script>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/eastmount.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
