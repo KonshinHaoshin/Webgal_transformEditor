@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import './transform-editor.css';
 import {TransformData} from "./types/transform.ts";
 import {exportScript,parseScript} from "./utils/transformParser.ts";
@@ -9,8 +9,7 @@ export default function TransformEditor() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [input, setInput] = useState("");
     const [transforms, setTransforms] = useState<TransformData[]>([]);
-    const [dragging, setDragging] = useState<number | null>(null);
-    const [offset, setOffset] = useState({ x: 0, y: 0 });
+    const [dragging] = useState<number | null>(null);
     const [modelImg, setModelImg] = useState<HTMLImageElement | null>(null);
     const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
     const [, setAllSelected] = useState(false);
@@ -19,10 +18,7 @@ export default function TransformEditor() {
     const [exportDuration, setExportDuration] = useState(500); // 更改duration值
     const [bgImg, setBgImg] = useState<HTMLImageElement | null>(null); // 背景图片
     const bgBaseScaleRef = useRef<{ x: number; y: number }>({ x: 1, y: 1 });
-    // 添加鼠标旋转
-    const [rotating, setRotating] = useState(false);
-    const [initialRotation, setInitialRotation] = useState(0);
-    const [rotationStartAngle, setRotationStartAngle] = useState(0);
+    const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
 
     const canvasWidth = 2560;
     const canvasHeight = 1440;
@@ -30,8 +26,7 @@ export default function TransformEditor() {
     const baseHeight = 1440;
     const scaleX = canvasWidth / baseWidth;
     const scaleY = canvasHeight / baseHeight;
-    const centerX = canvasWidth / 2;
-    const centerY = canvasHeight / 2;
+
 
     const modelOriginalWidth = 741;
     const modelOriginalHeight = 1123;
@@ -50,177 +45,38 @@ export default function TransformEditor() {
     }, []);
 
 
-    const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-        const { x: mx, y: my } = getCanvasMousePosition(e);
 
-        for (let index = transforms.length - 1; index >= 0; index--) {
-            const obj = transforms[index];
-            const { x, y } = obj.transform.position;
-            const scale = obj.transform.scale.x;
-            const cx = centerX + x;
-            const cy = centerY + y;
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
 
-            let w, h;
-            if (obj.target === "bg-main" && bgImg) {
-                w = bgImg.width * scaleX * scale;
-                h = bgImg.height * scaleY * scale;
-            } else if (modelImg) {
-                w = modelOriginalWidth * scaleX * scale;
-                h = modelOriginalHeight * scaleY * scale;
-            } else continue;
+        const handleMove = (e: MouseEvent) => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = (e.clientX - rect.left) * (canvasWidth / rect.width);
+            const my = (e.clientY - rect.top) * (canvasHeight / rect.height);
 
-            if (mx >= cx - w / 2 && mx <= cx + w / 2 && my >= cy - h / 2 && my <= cy + h / 2) {
-                console.log(`🖱️ MouseDown at (${mx.toFixed(1)}, ${my.toFixed(1)})`);
-                console.log(`🎯 Hit target: ${obj.target}`);
-                console.log(`📍 Model Center: (${cx.toFixed(1)}, ${cy.toFixed(1)})`);
-                console.log(`📐 Width: ${w.toFixed(1)}, Height: ${h.toFixed(1)}`);
-                setOffset({ x: mx, y: my });
+            const logicX = (mx - canvasWidth / 2) / scaleX;
+            const logicY = (my - canvasHeight / 2) / scaleY;
 
-                if (e.altKey) {
-                    setRotating(true);
-                    setDragging(index); // 记录正在旋转哪个 figure
+            setMousePos({ x: logicX, y: logicY });
+        };
 
-                    // 记录初始角度
-                    const dx = mx - cx;
-                    const dy = my - cy;
-                    const startAngle = Math.atan2(dy, dx);
-                    setRotationStartAngle(startAngle);
-                    setInitialRotation(transforms[index].transform.rotation || 0);
-                } else {
-                    setDragging(index);
-                    if (e.shiftKey) {
-                        setSelectedIndexes(prev => prev.includes(index) ? prev : [...prev, index]);
-                    } else {
-                        setSelectedIndexes([index]);
-                    }
-                }
-                break;
-            }
-        }
-    };
+        const handleLeave = () => setMousePos(null);
 
-    const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-        if (dragging === null) return;
-        const { x: mx, y: my } = getCanvasMousePosition(e);
+        canvas.addEventListener("mousemove", handleMove);
+        canvas.addEventListener("mouseleave", handleLeave);
 
-        if (rotating) {
-            const obj = transforms[dragging];
-            const { x, y } = obj.transform.position;
-            const cx = centerX + x;
-            const cy = centerY + y;
-
-            const dx = mx - cx;
-            const dy = my - cy;
-            const currentAngle = Math.atan2(dy, dx);
-
-            const deltaAngle = currentAngle - rotationStartAngle;
-
-            setTransforms((prev) => {
-                const copy = [...prev];
-                copy[dragging].transform.rotation = initialRotation + deltaAngle;
-                return [...copy];
-            });
-
-            return;
-        }
-
-
-        // 加入判断
-
-        const dx = lockX ? 0 : (mx - offset.x) / scaleX;
-        const dy = lockY ? 0 : (my - offset.y) / scaleY;
-
-        setTransforms((prev) => {
-            const copy = [...prev];
-            selectedIndexes.forEach((i) => {
-                copy[i].transform.position.x += dx;
-                copy[i].transform.position.y += dy;
-                const posX = centerX + copy[i].transform.position.x;
-                const posY = centerY + copy[i].transform.position.y;
-                console.log(`🚚 Moving ${copy[i].target}: new center = (${posX.toFixed(1)}, ${posY.toFixed(1)})`);
-            });
-            return copy;
-        });
-
-        if (!rotating) {
-            const obj = transforms[dragging];
-            const posX = centerX + obj.transform.position.x;
-            const posY = centerY + obj.transform.position.y;
-            console.log(`🚚 Dragging ${obj.target} at (${posX.toFixed(1)}, ${posY.toFixed(1)})`);
-        }
-
-
-        setOffset({ x: mx, y: my });
-    };
-
-    const handleMouseUp = () => {
-        setDragging(null);
-        setRotating(false);
-    };
-
-    const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-        // ✅ 如果没有按住 Ctrl 或 Alt，则允许滚动页面
-        if (!e.ctrlKey && !e.altKey) return;
-
-        e.preventDefault(); // ✅ 阻止默认滚动
-
-        const { x: mx, y: my } = getCanvasMousePosition(e);
-
-        for (let index = transforms.length - 1; index >= 0; index--) {
-            const obj = transforms[index];
-            const { x, y } = obj.transform.position;
-            const scale = obj.transform.scale.x;
-            const cx = centerX + x;
-            const cy = centerY + y;
-
-            let w = 0, h = 0;
-            if (obj.target === "bg-main" && bgImg) {
-                w = bgImg.width * obj.transform.scale.x * scaleX;
-                h = bgImg.height * obj.transform.scale.y * scaleY;
-            } else if (modelImg) {
-                w = modelOriginalWidth * scaleX * scale;
-                h = modelOriginalHeight * scaleY * scale;
-            } else continue;
-
-            if (mx >= cx - w / 2 && mx <= cx + w / 2 && my >= cy - h / 2 && my <= cy + h / 2) {
-                const delta = e.deltaY < 0 ? 0.05 : -0.05;
-                const newScale = Math.max(0.1, obj.transform.scale.x + delta);
-
-                setTransforms((prev) => {
-                    const copy = [...prev];
-                    const targets = selectedIndexes.length > 0 ? selectedIndexes : [index];
-                    targets.forEach((i) => {
-                        copy[i].transform.scale.x = newScale;
-                        copy[i].transform.scale.y = newScale;
-                    });
-                    return copy;
-                });
-                break;
-            }
-        }
-    };
+        return () => {
+            canvas.removeEventListener("mousemove", handleMove);
+            canvas.removeEventListener("mouseleave", handleLeave);
+        };
+    }, [canvasRef.current, canvasWidth, canvasHeight]);
 
 
 
     useEffect(() => {
     }, [transforms, dragging, modelImg]);
 
-    const getCanvasMousePosition = (e: React.MouseEvent<HTMLCanvasElement>) => {
-        const canvas = canvasRef.current!;
-        const rect = canvas.getBoundingClientRect();
-
-        const clientX = e.clientX - rect.left;
-        const clientY = e.clientY - rect.top;
-
-        // rect.width 和 canvas.width 是不一样的
-        const ratioX = canvas.width / rect.width;
-        const ratioY = canvas.height / rect.height;
-
-        return {
-            x: clientX * ratioX,
-            y: clientY * ratioY,
-        };
-    };
 
 
     return (
@@ -291,29 +147,46 @@ export default function TransformEditor() {
                 </label>
             </div>
             <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>
+
                 <canvas
                     ref={canvasRef}
                     width={canvasWidth}
                     height={canvasHeight}
-                    onMouseDown={handleMouseDown}
-                    onMouseMove={handleMouseMove}
-                    onMouseUp={handleMouseUp}
-                    onWheel={handleWheel}
                     style={{
                         width: "100%",
                         height: "auto",
                         maxHeight: 450,
                         maxWidth: 800,
-                        border: "1px solid #ccc"
+                        border: "1px solid red",
+                        backgroundColor: "#f8f8f8"
                     }}
                 />
+                {mousePos && (
+                    <div
+                        style={{
+                            position: "fixed", // 使用 fixed 确保浮在最上层
+                            top: 10,
+                            right: 10,
+                            backgroundColor: "rgba(0, 0, 0, 0.7)",
+                            color: "#fff",
+                            padding: "6px 10px",
+                            borderRadius: 4,
+                            fontSize: 12,
+                            zIndex: 1000,
+                            pointerEvents: "none",
+                        }}
+                    >
+                        Mouse: (x: {mousePos.x.toFixed(1)}, y: {mousePos.y.toFixed(1)})
+                    </div>
+                )}
                 <CanvasRenderer
                     canvasRef={canvasRef}
                     transforms={transforms}
+                    setTransforms={setTransforms}
+                    selectedIndexes={selectedIndexes}
+                    setSelectedIndexes={setSelectedIndexes}
                     modelImg={modelImg}
                     bgImg={bgImg}
-                    selectedIndexes={selectedIndexes}
-                    dragging={dragging}
                     baseWidth={baseWidth}
                     baseHeight={baseHeight}
                     canvasWidth={canvasWidth}
