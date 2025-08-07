@@ -1,19 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import './transform-editor.css';
-
-interface TransformData {
-    type: 'setTransform' | 'changeFigure';
-    target: string;
-    duration: number;
-    transform: {
-        position: { x: number; y: number };
-        scale: { x: number; y: number };
-        [key: string]: any;
-    };
-    path?: string; // 对于 changeFigure，保存路径
-    extraParams?: Record<string, string>; // 保存 motion / expression 等
-}
-
+import {TransformData} from "./types/transform.ts";
+import {exportScript,parseScript} from "./utils/transformParser.ts";
+import CanvasRenderer from "./components/CanvasRenderer.tsx";
+import RotationPanel from "./components/RotationPanel";
 
 export default function TransformEditor() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -59,202 +49,6 @@ export default function TransformEditor() {
         bg.onload = () => setBgImg(bg);
     }, []);
 
-
-    const parseScript = (script: string): TransformData[] => {
-        const lines = script.split(";").map(line => line.trim()).filter(Boolean);
-
-        return lines.map((line) => {
-            const [command, ...rest] = line.split(" -");
-
-            if (command.startsWith("setTransform:")) {
-                const jsonStr = command.replace("setTransform:", "").trim();
-                const params = Object.fromEntries(rest.map(s => s.split("=").map(v => v.trim())));
-
-                const json = JSON.parse(jsonStr);
-                const transform: any = {
-                    ...json,
-                    position: {
-                        x: (json.position?.x ?? 0) * scaleX,
-                        y: (json.position?.y ?? 0) * scaleY
-                    },
-                    scale: json.scale || { x: 1, y: 1 },
-                };
-
-                return {
-                    type: "setTransform",
-                    target: params.target,
-                    duration: parseInt(params.duration || "500"),
-                    transform
-                };
-            }
-
-            if (command.startsWith("changeFigure:")) {
-                const path = command.replace("changeFigure:", "").trim();
-
-                const params: Record<string, string> = {};
-                let transform: any = { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } };
-
-                for (const part of rest) {
-                    const [k, v] = part.split("=").map((s) => s?.trim());
-                    if (k === "transform") {
-                        try {
-                            const json = JSON.parse(v);
-                            transform = {
-                                ...json,
-                                position: {
-                                    x: (json.position?.x ?? 0) * scaleX,
-                                    y: (json.position?.y ?? 0) * scaleY
-                                },
-                                scale: json.scale || { x: 1, y: 1 },
-                            };
-                        } catch (err) {
-                            console.warn("❌ 解析 transform JSON 失败:", v);
-                        }
-                    } else if (k && v) {
-                        params[k] = v;
-                    } else if (k && !v) {
-                        // 像 -next 这种无值参数
-                        params[k] = "";
-                    }
-                }
-
-                return {
-                    type: "changeFigure",
-                    path,
-                    target: params.id || "unknown",
-                    duration: 0,
-                    transform,
-                    extraParams: Object.fromEntries(
-                        Object.entries(params).filter(([k]) => k !== "id" && k !== "transform")
-                    )
-                };
-            }
-
-            alert("⚠️ 不支持的指令格式：" + line);
-            return {
-                type: "setTransform",
-                target: "invalid",
-                duration: 0,
-                transform: { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } }
-            };
-        });
-    };
-
-    const drawCanvas = () => {
-        const canvas = canvasRef.current;
-        if (!canvas || !modelImg) return;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-
-        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-        ctx.font = "16px Arial";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "bottom";
-
-        ctx.strokeStyle = "#ccc";
-        ctx.beginPath();
-        ctx.moveTo(centerX - 5, centerY);
-        ctx.lineTo(centerX + 5, centerY);
-        ctx.moveTo(centerX, centerY - 5);
-        ctx.lineTo(centerX, centerY + 5);
-        ctx.stroke();
-
-        if (transforms.length === 0) {
-            ctx.fillStyle = "#aaa";
-            ctx.fillText("No data loaded", centerX, centerY);
-            return;
-        }
-
-        transforms.forEach((obj, index) => {
-            const { x, y } = obj.transform.position;
-            const scale = obj.transform.scale?.x || 1;
-            const cx = centerX + x;
-            const cy = centerY + y;
-
-            const isBackground = obj.target === "bg-main";
-            const imageToDraw = isBackground ? bgImg : modelImg;
-
-            if (!imageToDraw) return;
-
-            if (isBackground) {
-                const w = imageToDraw.width * scale * scaleX;
-                const h = imageToDraw.height * scale * scaleY;
-
-                ctx.save();
-                ctx.translate(cx, cy);
-                ctx.rotate(obj.transform.rotation || 0); // 弧度制旋转
-                ctx.drawImage(imageToDraw, -w / 2, -h / 2, w, h);
-                ctx.restore();
-
-                if (selectedIndexes.includes(index)) {
-                    ctx.strokeStyle = "#00f";
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(cx - w / 2, cy - h / 2, w, h);
-                    ctx.lineWidth = 1;
-                }
-
-                ctx.fillStyle = "#000";
-                ctx.fillText(obj.target, cx, cy - h / 2 - 10);
-            }
-
-            let w, h;
-            if (obj.target === "bg-main" && bgImg) {
-                const base = bgBaseScaleRef.current;
-                w = bgImg.width * scaleX * obj.transform.scale.x * base.x;
-                h = bgImg.height * scaleY * obj.transform.scale.y * base.y;
-            } else {
-                w = modelOriginalWidth * scaleX * scale;
-                h = modelOriginalHeight * scaleY * scale;
-            }
-
-
-            ctx.save();
-            ctx.translate(cx, cy);
-            ctx.rotate(obj.transform.rotation || 0);
-            ctx.drawImage(imageToDraw, -w / 2, -h / 2, w, h);
-            ctx.restore();
-
-            if (selectedIndexes.includes(index)) {
-                ctx.strokeStyle = "#00f";
-                ctx.lineWidth = 2;
-                ctx.strokeRect(cx - w / 2, cy - h / 2, w, h);
-                ctx.lineWidth = 1;
-            }
-
-            ctx.fillStyle = "#000";
-            ctx.fillText(obj.target, cx, cy - h / 2 - 10);
-        });
-    };
-
-
-    const exportScript = (): string => {
-        const scaleRatioX = baseWidth / canvasWidth;
-        const scaleRatioY = baseHeight / canvasHeight;
-
-        return transforms.map(obj => {
-            const transform = {
-                ...obj.transform,
-                position: {
-                    x: obj.transform.position.x * scaleRatioX,
-                    y: obj.transform.position.y * scaleRatioY,
-                }
-            };
-            const roundedTransform = roundTransform(transform);
-            const transformJson = JSON.stringify(roundedTransform);
-
-            if (obj.type === "setTransform") {
-                return `setTransform:${transformJson} -target=${obj.target} -duration=${exportDuration} -next;`;
-            }
-
-            if (obj.type === "changeFigure") {
-                const extras = Object.entries(obj.extraParams || {})
-                    .map(([k, v]) => `-${k}=${v}`).join(" ");
-                return `changeFigure:${obj.path} -id=${obj.target} -transform=${transformJson} ${extras};`;
-            }
-
-            return "";
-        }).join("\n");
-    };
 
     const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
         const { x: mx, y: my } = getCanvasMousePosition(e);
@@ -393,7 +187,6 @@ export default function TransformEditor() {
 
 
     useEffect(() => {
-        drawCanvas();
     }, [transforms, dragging, modelImg]);
 
     const getCanvasMousePosition = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -406,25 +199,6 @@ export default function TransformEditor() {
             y: (e.clientY - rect.top) * scaleY
         };
     };
-    // 通用保留两位小数函数
-    const roundToTwo = (num: number): number => {
-        return Math.round(num * 100) / 100;
-    };
-
-    const roundTransform = (obj: any): any => {
-        if (typeof obj === 'number') {
-            return roundToTwo(obj);
-        } else if (typeof obj === 'object' && obj !== null) {
-            const result: any = Array.isArray(obj) ? [] : {};
-            for (const key in obj) {
-                result[key] = roundTransform(obj[key]);
-            }
-            return result;
-        } else {
-            return obj;
-        }
-    };
-
 
     return (
         <div
@@ -447,7 +221,7 @@ export default function TransformEditor() {
             />
             <br />
             <button onClick={() => {
-                const parsed = parseScript(input);
+                const parsed = parseScript(input, scaleX, scaleY);
                 if (parsed.length === 0) alert("⚠️ 没有解析到任何 setTransform 指令！");
                 setTransforms(parsed);
                 setAllSelected(false);
@@ -456,7 +230,8 @@ export default function TransformEditor() {
                 Load Script
             </button>
             <button onClick={() => {
-                navigator.clipboard.writeText(exportScript());
+                const script = exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight);
+                navigator.clipboard.writeText(script);
                 alert("Script copied!");
             }}>
                 Copy Output Script
@@ -509,34 +284,43 @@ export default function TransformEditor() {
 
                     }}
                 />
+                <CanvasRenderer
+                    canvasRef={canvasRef}
+                    transforms={transforms}
+                    modelImg={modelImg}
+                    bgImg={bgImg}
+                    selectedIndexes={selectedIndexes}
+                    dragging={dragging}
+                    baseWidth={baseWidth}
+                    baseHeight={baseHeight}
+                    canvasWidth={canvasWidth}
+                    canvasHeight={canvasHeight}
+                    modelOriginalWidth={modelOriginalWidth}
+                    modelOriginalHeight={modelOriginalHeight}
+                    bgBaseScaleRef={bgBaseScaleRef}
+                />
+
             </div>
             {selectedIndexes.length > 0 && (
                 <div style={{ marginTop: 20 }}>
-                    <h3>Rotation（单位：弧度）</h3>
-                    {selectedIndexes.map((index) => (
-                        <div key={index} style={{ marginBottom: 6 }}>
-                            <span>{transforms[index].target}</span>
-                            <input
-                                type="number"
-                                step="0.01"
-                                value={transforms[index].transform.rotation || 0}
-                                onChange={(e) => {
-                                    const val = parseFloat(e.target.value);
-                                    setTransforms((prev) => {
-                                        const copy = [...prev];
-                                        copy[index].transform.rotation = val;
-                                        return [...copy]; // ✅ 触发变更
-                                    });
-                                }}
-                                style={{ marginLeft: 10, width: 100 }}
-                            />
-                        </div>
-                    ))}
+                    {selectedIndexes.length > 0 && (
+                        <RotationPanel
+                            transforms={transforms}
+                            selectedIndexes={selectedIndexes}
+                            onChange={(index, newRotation) => {
+                                setTransforms((prev) => {
+                                    const copy = [...prev];
+                                    copy[index].transform.rotation = newRotation;
+                                    return copy;
+                                });
+                            }}
+                        />
+                    )}
                 </div>
             )}
 
             <h3>Output Script:</h3>
-            <pre>{exportScript()}</pre>
+            <pre>{exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight)}</pre>
         </div>
     );
 

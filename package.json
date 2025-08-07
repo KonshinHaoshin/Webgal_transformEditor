@@ -15,7 +15,9 @@
     "@tauri-apps/plugin-opener": "^2",
     "aos": "^2.3.4",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "pixi-filters": "^4.2.0",
+    "pixi.js": "^6.3.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
