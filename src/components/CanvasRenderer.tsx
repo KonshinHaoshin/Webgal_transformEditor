@@ -275,8 +275,6 @@ export default function CanvasRenderer(props: Props) {
                     }
                 });
 
-
-
             // 📏 蓝色边框
             if (selectedIndexes.includes(index)) {
                 const g = new PIXI.Graphics();

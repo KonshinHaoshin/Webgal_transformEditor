@@ -52,6 +52,12 @@ export function exportScript(
                 .map(([k, v]) => `-${k}=${v}`).join(" ");
             return `changeFigure:${obj.path} -id=${obj.target} -transform=${transformJson} ${extras};`;
         }
+        if (obj.type=="changeBg")
+        {
+            const extras = Object.entries(obj.extraParams || {})
+                .map(([k, v]) => `-${k}=${v}`).join(" ");
+            return `changeBg:${obj.path} -transform=${transformJson} ${extras};`;
+        }
 
         return "";
     }).join("\n");
@@ -126,7 +132,49 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
             };
         }
 
-        alert("⚠️ 不支持的指令格式：" + line);
+        if (command.startsWith("changeBg:")) {
+            const path = command.replace("changeBg:", "").trim();
+
+            const params: Record<string, string> = {};
+            let transform: any = { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } };
+
+            for (const part of rest) {
+                const [k, v] = part.split("=").map((s) => s?.trim());
+                if (k === "transform") {
+                    try {
+                        const json = JSON.parse(v);
+                        transform = {
+                            ...json,
+                            position: {
+                                x: (json.position?.x ?? 0) * scaleX,
+                                y: (json.position?.y ?? 0) * scaleY
+                            },
+                            scale: json.scale || { x: 1, y: 1 },
+                        };
+                    } catch (err) {
+                        console.warn("❌ 解析 transform JSON 失败:", v);
+                    }
+                } else if (k && v) {
+                    params[k] = v;
+                } else if (k && !v) {
+                    params[k] = ""; // 支持 -next 等无值参数
+                }
+            }
+
+            return {
+                type: "changeBg",
+                path,
+                target: "bg-main",
+                duration: 0,
+                transform,
+                extraParams: Object.fromEntries(
+                    Object.entries(params).filter(([k]) => k !== "transform")
+                )
+            };
+        }
+
+
+            alert("⚠️ 不支持的指令格式：" + line);
         return {
             type: "setTransform",
             target: "invalid",

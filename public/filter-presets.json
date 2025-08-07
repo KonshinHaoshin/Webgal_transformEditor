@@ -1,0 +1,34 @@
+{
+  "Fading Passion": {
+    "brightness": 0.9,
+    "contrast": 1.1,
+    "saturation": 0.9,
+    "gamma": 0.8,
+    "colorRed": 161,
+    "colorGreen": 213,
+    "colorBlue": 243,
+    "bevel":15,
+    "bevelThickness":10,
+    "bevelRed":227,
+    "bevelGreen":250,
+    "bevelBlue":252
+  },
+  "Silver Gray Love": {
+    "brightness":0.8,
+    "contrast":1.1,
+    "saturation":0.9,
+    "gamma":0.8,
+    "colorRed":242,
+    "colorGreen":216,
+    "colorBlue":194,
+    "bloom":0.5,
+    "bloomBrightness":0.8,
+    "bloomBlur":10,
+    "bevel":1,
+    "bevelThickness":15,
+    "bevelRotation":30,
+    "bevelRed":255,
+    "bevelGreen":212,
+    "bevelBlue":176
+  }
+}

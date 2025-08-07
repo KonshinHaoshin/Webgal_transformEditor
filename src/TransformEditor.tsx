@@ -19,6 +19,10 @@ export default function TransformEditor() {
     const [bgImg, setBgImg] = useState<HTMLImageElement | null>(null); // 背景图片
     const bgBaseScaleRef = useRef<{ x: number; y: number }>({ x: 1, y: 1 });
     const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
+    const [filterPresets, setFilterPresets] = useState<Record<string, any>>({});
+    const [enableFilterPreset, setEnableFilterPreset] = useState(true); // 默认启用
+    const [lastAppliedPresetKeys, setLastAppliedPresetKeys] = useState<string[]>([]);
+    const [applyFilterToBg, setApplyFilterToBg] = useState(false); // 默认不向背景添加
 
     const canvasWidth = 2560;
     const canvasHeight = 1440;
@@ -77,7 +81,12 @@ export default function TransformEditor() {
     useEffect(() => {
     }, [transforms, dragging, modelImg]);
 
-
+    useEffect(() => {
+        fetch("/filter-presets.json")
+            .then(res => res.json())
+            .then(data => setFilterPresets(data))
+            .catch(err => console.error("❌ Failed to load filter presets:", err));
+    }, []);
 
     return (
         <div
@@ -90,6 +99,24 @@ export default function TransformEditor() {
             }}
         >
             <h2>EASTMOUNT WEBGAL TRANSFORM EDITOR</h2>
+            <p style={{
+                backgroundColor: "#eef6ff",
+                color: "#333",
+                padding: "10px 14px",
+                borderRadius: "6px",
+                fontSize: "14px",
+                border: "1px solid #cde1f9",
+                maxWidth: 780,
+                margin: "10px auto"
+            }}>
+                💡 <strong>操作提示：</strong><br/>
+                ・按住 <strong>Ctrl</strong> + 鼠标滚轮：缩放模型或背景<br/>
+                ・按住 <strong>Alt</strong> + 拖动：旋转选中的对象<br/>
+                ・按住 <strong>Shift</strong> + 点击：多选对象<br/>
+                ・关注 <strong>东山燃灯寺</strong> 谢谢喵~
+
+            </p>
+
 
             <textarea
                 style={{ width: 1080, height: 100 }}
@@ -145,6 +172,79 @@ export default function TransformEditor() {
                         style={{ width: 80, marginLeft: 5 }}
                     />
                 </label>
+            </div>
+            <div style={{ marginTop: 20 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+                    <label>
+                        <input
+                            type="checkbox"
+                            checked={enableFilterPreset}
+                            onChange={(e) => {
+                                const checked = e.target.checked;
+                                setEnableFilterPreset(checked);
+
+                                if (!checked) {
+                                    // 只删除最近应用的 preset 字段
+                                    setTransforms(prev =>
+                                        prev.map(t => {
+                                            const updated = { ...t.transform };
+                                            lastAppliedPresetKeys.forEach(key => {
+                                                if (key in updated) delete updated[key];
+                                            });
+                                            return { ...t, transform: updated };
+                                        })
+                                    );
+                                    setLastAppliedPresetKeys([]);
+                                }
+                            }}
+                        />
+                        应用滤镜预设
+                    </label>
+
+                    <label>
+                        <input
+                            type="checkbox"
+                            checked={applyFilterToBg}
+                            onChange={() => setApplyFilterToBg(!applyFilterToBg)}
+                        />
+                        同时作用于背景
+                    </label>
+                </div>
+
+                <label style={{ marginTop: 10, display: "block" }}>选择预设：</label>
+                <select
+                    onChange={(e) => {
+                        const preset = filterPresets[e.target.value];
+                        if (!preset) return;
+
+                        if (!enableFilterPreset) {
+                            alert("请先勾选“应用滤镜预设”再使用");
+                            return;
+                        }
+
+                        const keys = Object.keys(preset);
+                        setLastAppliedPresetKeys(keys);
+
+                        setTransforms(prev =>
+                            prev.map(t => {
+                                if (t.target === "bg-main" && !applyFilterToBg) return t;
+                                return {
+                                    ...t,
+                                    transform: {
+                                        ...t.transform,
+                                        ...preset,
+                                    }
+                                };
+                            })
+                        );
+                    }}
+                    defaultValue=""
+                >
+                    <option value="" disabled>选择一个预设...</option>
+                    {Object.keys(filterPresets).map((key) => (
+                        <option key={key} value={key}>{key}</option>
+                    ))}
+                </select>
             </div>
             <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>
 

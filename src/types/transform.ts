@@ -1,5 +1,5 @@
 export interface TransformData {
-    type: 'setTransform' | 'changeFigure';
+    type: 'setTransform' | 'changeFigure'| 'changeBg';
     target: string;
     duration: number;
     transform: {
