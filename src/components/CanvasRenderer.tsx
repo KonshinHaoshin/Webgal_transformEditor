@@ -17,22 +17,22 @@ interface Props {
     modelOriginalWidth: number;
     modelOriginalHeight: number;
     bgBaseScaleRef: React.MutableRefObject<{ x: number; y: number }>;
+    appRef: React.MutableRefObject<PIXI.Application | null>;
 }
 
 export default function CanvasRenderer(props: Props) {
     const {
         canvasRef, transforms, modelImg, bgImg,
         selectedIndexes,
-        baseWidth, baseHeight, canvasWidth, canvasHeight,
+        canvasWidth, canvasHeight,
         modelOriginalWidth, modelOriginalHeight,
+        // @ts-ignore
         bgBaseScaleRef
     } = props;
 
     const appRef = useRef<PIXI.Application | null>(null);
     const spriteMap = useRef<Record<string, PixiContainer>>({}); // target -> PixiContainer
 
-    const scaleX = canvasWidth / baseWidth;
-    const scaleY = canvasHeight / baseHeight;
     const centerX = canvasWidth / 2;
     const centerY = canvasHeight / 2;
 
@@ -75,22 +75,37 @@ export default function CanvasRenderer(props: Props) {
 
             const sprite = PIXI.Sprite.from(img);
 
+            // @ts-ignore
             const scale = t.transform.scale?.x ?? 1;
 
-            const drawW = isBg
-                ? bgImg!.width * scaleX * scale * bgBaseScaleRef.current.x
-                : modelOriginalWidth * scaleX * scale;
+            let drawW = 0, drawH = 0;
+            if (isBg && bgImg) {
+                const imageRatio = bgImg.width / bgImg.height;
+                const canvasRatio = canvasWidth / canvasHeight;
+                let fitScale = canvasWidth / bgImg.width;
+                if (canvasRatio < imageRatio) {
+                    fitScale = canvasHeight / bgImg.height;
+                }
+                const userScale = t.transform.scale.x ?? 1;
 
-            const drawH = isBg
-                ? bgImg!.height * scaleY * scale * bgBaseScaleRef.current.y
-                : modelOriginalHeight * scaleY * scale;
+                drawW = bgImg.width * fitScale * userScale;
+                drawH = bgImg.height * fitScale * userScale;
+            } else {
+                const scale = t.transform.scale.x ?? 1;
+                drawW = modelOriginalWidth  * scale;
+                drawH = modelOriginalHeight  * scale;
+            }
+
+
 
             sprite.width = drawW;
             sprite.height = drawH;
             sprite.anchor.set(0.5);
 
-            container.x = centerX + t.transform.position.x;
-            container.y = centerY + t.transform.position.y;
+            container.x = centerX + t.transform.position.x ;
+            container.y = centerY + t.transform.position.y ;
+
+            console.log(`🖼️ Render ${t.target} at (${container.x.toFixed(1)}, ${container.y.toFixed(1)}) with size: ${drawW.toFixed(1)} x ${drawH.toFixed(1)}, rotation: ${(t.transform.rotation ?? 0).toFixed(3)} rad`);
 
             // 👇 添加角色名文本
             const nameText = new PIXI.Text(t.target, {

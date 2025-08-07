@@ -24,11 +24,10 @@ export default function TransformEditor() {
     const [initialRotation, setInitialRotation] = useState(0);
     const [rotationStartAngle, setRotationStartAngle] = useState(0);
 
-    const canvasWidth = 1600;
-    const canvasHeight = 900;
+    const canvasWidth = 2560;
+    const canvasHeight = 1440;
     const baseWidth = 2560;
     const baseHeight = 1440;
-
     const scaleX = canvasWidth / baseWidth;
     const scaleY = canvasHeight / baseHeight;
     const centerX = canvasWidth / 2;
@@ -36,6 +35,7 @@ export default function TransformEditor() {
 
     const modelOriginalWidth = 741;
     const modelOriginalHeight = 1123;
+
 
     useEffect(() => {
         // const isDev = import.meta.env.MODE === 'development';
@@ -70,6 +70,10 @@ export default function TransformEditor() {
             } else continue;
 
             if (mx >= cx - w / 2 && mx <= cx + w / 2 && my >= cy - h / 2 && my <= cy + h / 2) {
+                console.log(`🖱️ MouseDown at (${mx.toFixed(1)}, ${my.toFixed(1)})`);
+                console.log(`🎯 Hit target: ${obj.target}`);
+                console.log(`📍 Model Center: (${cx.toFixed(1)}, ${cy.toFixed(1)})`);
+                console.log(`📐 Width: ${w.toFixed(1)}, Height: ${h.toFixed(1)}`);
                 setOffset({ x: mx, y: my });
 
                 if (e.altKey) {
@@ -122,17 +126,29 @@ export default function TransformEditor() {
 
 
         // 加入判断
-        const dx = lockX ? 0 : mx - offset.x;
-        const dy = lockY ? 0 : my - offset.y;
+
+        const dx = lockX ? 0 : (mx - offset.x) / scaleX;
+        const dy = lockY ? 0 : (my - offset.y) / scaleY;
 
         setTransforms((prev) => {
             const copy = [...prev];
             selectedIndexes.forEach((i) => {
                 copy[i].transform.position.x += dx;
                 copy[i].transform.position.y += dy;
+                const posX = centerX + copy[i].transform.position.x;
+                const posY = centerY + copy[i].transform.position.y;
+                console.log(`🚚 Moving ${copy[i].target}: new center = (${posX.toFixed(1)}, ${posY.toFixed(1)})`);
             });
             return copy;
         });
+
+        if (!rotating) {
+            const obj = transforms[dragging];
+            const posX = centerX + obj.transform.position.x;
+            const posY = centerY + obj.transform.position.y;
+            console.log(`🚚 Dragging ${obj.target} at (${posX.toFixed(1)}, ${posY.toFixed(1)})`);
+        }
+
 
         setOffset({ x: mx, y: my });
     };
@@ -192,13 +208,20 @@ export default function TransformEditor() {
     const getCanvasMousePosition = (e: React.MouseEvent<HTMLCanvasElement>) => {
         const canvas = canvasRef.current!;
         const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
+
+        const clientX = e.clientX - rect.left;
+        const clientY = e.clientY - rect.top;
+
+        // rect.width 和 canvas.width 是不一样的
+        const ratioX = canvas.width / rect.width;
+        const ratioY = canvas.height / rect.height;
+
         return {
-            x: (e.clientX - rect.left) * scaleX,
-            y: (e.clientY - rect.top) * scaleY
+            x: clientX * ratioX,
+            y: clientY * ratioY,
         };
     };
+
 
     return (
         <div
@@ -279,9 +302,9 @@ export default function TransformEditor() {
                     style={{
                         width: "100%",
                         height: "auto",
-                        maxHeight: 500,
+                        maxHeight: 450,
+                        maxWidth: 800,
                         border: "1px solid #ccc"
-
                     }}
                 />
                 <CanvasRenderer
