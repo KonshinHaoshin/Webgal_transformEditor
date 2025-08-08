@@ -48,9 +48,23 @@ export function exportScript(
         }
 
         if (obj.type === "changeFigure") {
+            const transform = {
+                ...obj.transform,
+                position: {
+                    x: obj.transform.position.x * scaleRatioX,
+                    y: obj.transform.position.y * scaleRatioY,
+                }
+            };
+            const roundedTransform = roundTransform(transform);
+            const transformJson = JSON.stringify(roundedTransform);
+
+            // extras：无值参数输出成 "-k"，有值参数输出 "-k=v"
             const extras = Object.entries(obj.extraParams || {})
-                .map(([k, v]) => `-${k}=${v}`).join(" ");
-            return `changeFigure:${obj.path} -id=${obj.target} -transform=${transformJson} ${extras};`;
+                .map(([k, v]) => (v === "" || v === undefined) ? ` -${k}` : ` -${k}=${v}`)
+                .join("");
+
+            const presetFlag = obj.presetPosition && obj.presetPosition !== 'center' ? ` -${obj.presetPosition}` : '';
+            return `changeFigure:${obj.path} -id=${obj.target} -transform=${transformJson}${extras}${presetFlag};`;
         }
         if (obj.type=="changeBg")
         {
@@ -97,8 +111,19 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
             const params: Record<string, string> = {};
             let transform: any = { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } };
 
+            // 新增：预设位
+            let presetPosition: 'left' | 'center' | 'right' | undefined;
+
             for (const part of rest) {
-                const [k, v] = part.split("=").map((s) => s?.trim());
+                const raw = part.trim();
+
+                // 在 split(" -") 的前提下，"-left" 会变成 "left"
+                if (raw === "left" || raw === "center" || raw === "right") {
+                    presetPosition = raw as any;
+                    continue;
+                }
+
+                const [k, v] = raw.split("=").map((s) => s?.trim());
                 if (k === "transform") {
                     try {
                         const json = JSON.parse(v);
@@ -110,15 +135,17 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
                             },
                             scale: json.scale || { x: 1, y: 1 },
                         };
-                    } catch (err) {
+                    } catch {
                         console.warn("❌ 解析 transform JSON 失败:", v);
                     }
                 } else if (k && v) {
                     params[k] = v;
                 } else if (k && !v) {
-                    params[k] = ""; // 支持 -next 等无值参数
+                    params[k] = "";
                 }
             }
+
+            if (!presetPosition) presetPosition = 'center';
 
             return {
                 type: "changeFigure",
@@ -126,6 +153,7 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
                 target: params.id || "unknown",
                 duration: 0,
                 transform,
+                presetPosition, // ✅ 记录预设位
                 extraParams: Object.fromEntries(
                     Object.entries(params).filter(([k]) => k !== "id" && k !== "transform")
                 )

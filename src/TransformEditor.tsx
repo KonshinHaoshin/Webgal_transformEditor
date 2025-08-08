@@ -31,24 +31,33 @@ export default function TransformEditor() {
     const scaleX = canvasWidth / baseWidth;
     const scaleY = canvasHeight / baseHeight;
 
-
+    // 这玩意儿没什么用，但是我懒得删了
     const modelOriginalWidth = 741;
     const modelOriginalHeight = 1123;
+    const scaleModel=1;
+    const modelWidth=modelOriginalWidth*scaleModel;
+    const modelHeight=modelOriginalHeight*scaleModel;
 
+    function nextFigureName(list: TransformData[]) {
+        let max = 0;
+        for (const t of list) {
+            const m = /^figure(\d+)$/.exec(t.target);
+            if (m) max = Math.max(max, parseInt(m[1], 10));
+        }
+        return `figure${max + 1}`;
+    }
 
     useEffect(() => {
         // const isDev = import.meta.env.MODE === 'development';
 
         const model = new Image();
-        model.src = './assets/model.png';
+        model.src = './assets/sakiko_girlfriend.png'; // 恭喜你发现了私货！
         model.onload = () => setModelImg(model);
 
         const bg = new Image();
         bg.src = './assets/bg.png';
         bg.onload = () => setBgImg(bg);
     }, []);
-
-
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -75,8 +84,6 @@ export default function TransformEditor() {
             canvas.removeEventListener("mouseleave", handleLeave);
         };
     }, [canvasRef.current, canvasWidth, canvasHeight]);
-
-
 
     useEffect(() => {
     }, [transforms, dragging, modelImg]);
@@ -127,8 +134,10 @@ export default function TransformEditor() {
             />
             <br />
             <button onClick={() => {
-                const parsed = parseScript(input, scaleX, scaleY);
-                if (parsed.length === 0) alert("⚠️ 没有解析到任何 setTransform 指令！");
+                const parsed = parseScript(input,scaleX,scaleY).map(t => {
+                    const { __presetApplied, ...rest } = t as any;
+                    return rest;
+                });                if (parsed.length === 0) alert("⚠️ 没有解析到任何 setTransform 指令！");
                 setTransforms(parsed);
                 setAllSelected(false);
                 setSelectedIndexes([]);
@@ -154,6 +163,38 @@ export default function TransformEditor() {
             }}>
                 Deselect All
             </button>
+
+            <button
+                onClick={() => {
+                    const name = nextFigureName(transforms);
+                    const newItem: TransformData = {
+                        type: 'setTransform',
+                        target: name,
+                        duration: 0,
+                        transform: {
+                            position: { x: 0, y: 0 },
+                            scale: { x: 1, y: 1 },
+                        },
+                    };
+                    // 如果你希望默认“居中预设位”，可以顺手加：
+                    (newItem as any).presetPosition = 'center';
+
+                    setTransforms(prev => {
+                        const next = [...prev, newItem];
+                        return next;
+                    });
+
+                    // 选中新加的这一行，方便直接拖
+                    setSelectedIndexes([transforms.length]);
+
+                    // 考虑要不要写会textarea
+                    // const line = `setTransform:{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}} -target=${name} -duration=0 -next;`;
+                    // setInput(prev => (prev ? prev + '\n' : '') + line);
+                }}
+            >
+                + Add setTransform
+            </button>
+
             <div style={{ margin: "10px 0" }}>
                 <label>
                     <input type="checkbox" checked={lockX} onChange={() => setLockX(!lockX)} />
@@ -246,6 +287,7 @@ export default function TransformEditor() {
                     ))}
                 </select>
             </div>
+
             <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>
 
                 <canvas
@@ -291,29 +333,50 @@ export default function TransformEditor() {
                     baseHeight={baseHeight}
                     canvasWidth={canvasWidth}
                     canvasHeight={canvasHeight}
-                    modelOriginalWidth={modelOriginalWidth}
-                    modelOriginalHeight={modelOriginalHeight}
+                    modelOriginalWidth={modelWidth}
+                    modelOriginalHeight={modelHeight}
                     bgBaseScaleRef={bgBaseScaleRef}
                 />
 
             </div>
             {selectedIndexes.length > 0 && (
                 <div style={{ marginTop: 20 }}>
-                    {selectedIndexes.length > 0 && (
-                        <RotationPanel
-                            transforms={transforms}
-                            selectedIndexes={selectedIndexes}
-                            onChange={(index, newRotation) => {
-                                setTransforms((prev) => {
-                                    const copy = [...prev];
-                                    copy[index].transform.rotation = newRotation;
-                                    return copy;
-                                });
-                            }}
-                        />
-                    )}
+                    <RotationPanel
+                        transforms={transforms}
+                        selectedIndexes={selectedIndexes}
+                        onChange={(index, newRotation) => {
+                            setTransforms((prev) => {
+                                const copy = [...prev];
+                                copy[index] = {
+                                    ...copy[index],
+                                    transform: { ...copy[index].transform, rotation: newRotation },
+                                };
+                                return copy;
+                            });
+                        }}
+                        onChangeTarget={(index, newTarget) => {
+                            setTransforms((prev) => {
+                                const copy = [...prev];
+                                copy[index] = { ...copy[index], target: newTarget };
+                                return copy;
+                            });
+                        }}
+                        onChangeId={(index) => {
+                            setTransforms((prev) => {
+                                const copy = [...prev];
+                                const t = { ...copy[index] };
+
+
+                                // t.extraParams = { ...(t.extraParams || {}), id: newId };
+
+                                copy[index] = t;
+                                return copy;
+                            });
+                        }}
+                    />
                 </div>
             )}
+
 
             <h3>Output Script:</h3>
             <pre>{exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight)}</pre>

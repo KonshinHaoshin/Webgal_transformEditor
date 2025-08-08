@@ -9,4 +9,6 @@ export interface TransformData {
     };
     path?: string; // 对于 changeFigure，保存路径
     extraParams?: Record<string, string>; // 保存 motion / expression 等
+    // 仅changeFigure type会使用的类型
+    presetPosition?: 'left' | 'center' | 'right';
 }

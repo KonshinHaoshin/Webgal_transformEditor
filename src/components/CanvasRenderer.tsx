@@ -46,7 +46,11 @@ export default function CanvasRenderer(props: Props) {
     const initialRotationRef = useRef(0);
     const initialPositionsRef = useRef<Record<number, { x: number; y: number }>>({});
 
-
+// 约定：优先 t.presetPosition，其次 extraParams.preset，默认 'center'
+    function getPreset(t: TransformData): 'left'|'center'|'right' {
+        // @ts-ignore
+        return (t as any).presetPosition || (t as any).extraParams?.preset || 'center';
+    }
 
 
 // ✅ 1️⃣ 初始化 Pixi 应用，只做一次
@@ -83,8 +87,21 @@ export default function CanvasRenderer(props: Props) {
                 const obj = transforms[index];
                 const { x, y } = obj.transform.position;
                 const scale = obj.transform.scale.x;
-                const cx = centerX + x * scaleX;
-                const cy = centerY + y * scaleY;
+                const isBg = obj.target === 'bg-main';
+                let baseX = canvasWidth / 2, baseY = canvasHeight / 2;
+                if (!isBg && modelImg) {
+                    const imgW = modelImg.width, imgH = modelImg.height;
+                    const fitScale = Math.min(canvasWidth / imgW, canvasHeight / imgH);
+                    const preset = getPreset(obj as any);
+                    const targetWNoUser = imgW * fitScale;
+                    const targetHNoUser = imgH * fitScale;
+                    baseY = canvasHeight / 2 + (targetHNoUser < canvasHeight ? (canvasHeight - targetHNoUser) / 2 : 0);
+                    baseX = preset === 'left' ? targetWNoUser / 2 :
+                        preset === 'right' ? canvasWidth - targetWNoUser / 2 :
+                            canvasWidth / 2;
+                }
+                const cx = baseX + x * scaleX;
+                const cy = baseY + y * scaleY;
 
                 let w = 0, h = 0;
                 if (obj.target === "bg-main" && bgImg) {
@@ -150,30 +167,68 @@ export default function CanvasRenderer(props: Props) {
             );
             sprite.cursor = "pointer";
 
+            // —— 等比缩放 + 预设位（对 bg 与 非 bg 分开）——
             let drawW = 0, drawH = 0;
+            let baseX = centerX; // addFigure 的“基线 X”
+            let baseY = centerY; // addFigure 的“基线 Y”
+
             if (isBg && bgImg) {
+                // 背景：铺满画布（cover），保持你原有逻辑
                 const imageRatio = bgImg.width / bgImg.height;
                 const canvasRatio = canvasWidth / canvasHeight;
                 let fitScale = canvasWidth / bgImg.width;
                 if (canvasRatio < imageRatio) fitScale = canvasHeight / bgImg.height;
-                const userScale = t.transform.scale.x ?? 1;
+
+                const userScale = t.transform.scale?.x ?? 1;
                 drawW = bgImg.width * fitScale * userScale;
                 drawH = bgImg.height * fitScale * userScale;
+
+                // BG 永远居中
+                baseX = canvasWidth / 2;
+                baseY = canvasHeight / 2;
             } else {
-                const scale = t.transform.scale.x ?? 1;
-                drawW = modelOriginalWidth * scaleX * scale;
-                drawH = modelOriginalHeight * scaleY * scale;
+                // 立绘：按 addFigure 等比适配（contain），再叠加用户缩放
+                const imgW = modelImg!.width || 1;
+                const imgH = modelImg!.height || 1;
+
+                const fitScale = Math.min(canvasWidth / imgW, canvasHeight / imgH); // targetScale
+                const userScale = t.transform.scale?.x ?? 1;
+                const targetScale = fitScale * userScale;
+
+                drawW = imgW * targetScale;
+                drawH = imgH * targetScale;
+
+                // 垂直基线（与 addFigure 一致）
+                // 先以画布中线为基准，如果适配后的高度没有铺满，则把基线下移 (stageH - targetH)/2
+                baseY = canvasHeight / 2;
+                const targetHNoUser = imgH * fitScale; // 不含用户缩放的原始适配高度（对基线判断用）
+                if (targetHNoUser < canvasHeight) {
+                    baseY = canvasHeight / 2 + (canvasHeight - targetHNoUser) / 2;
+                }
+
+                // 水平预设位
+                const preset = getPreset(t); // 'left' | 'center' | 'right'
+                const targetWNoUser = imgW * fitScale; // 不含用户缩放的原始适配宽度（基线用）
+                if (preset === 'center') baseX = canvasWidth / 2;
+                if (preset === 'left')   baseX = targetWNoUser / 2;
+                if (preset === 'right')  baseX = canvasWidth - targetWNoUser / 2;
             }
 
+// 应用尺寸
             sprite.width = drawW;
             sprite.height = drawH;
             sprite.anchor.set(0.5);
             container.addChild(sprite);
 
-            container.x = centerX + t.transform.position.x;
-            container.y = centerY + t.transform.position.y;
+
+            const px = (t.transform.position?.x ?? 0) * scaleX;
+            const py = (t.transform.position?.y ?? 0) * scaleY;
+
+            container.x = baseX + px;
+            container.y = baseY + py;
             container.rotation = t.transform.rotation || 0;
             container.scale.set(1, 1);
+
 
             // 💡 设置滤镜字段（由 PixiContainer 实现）
             for (const key in t.transform) {
