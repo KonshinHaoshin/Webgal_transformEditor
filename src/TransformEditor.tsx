@@ -269,10 +269,19 @@ export default function TransformEditor() {
                         setTransforms(prev =>
                             prev.map(t => {
                                 if (t.target === "bg-main" && !applyFilterToBg) return t;
+                                
+                                // 创建新的transform对象，只保留位置、缩放、旋转等基础属性
+                                const newTransform = {
+                                    position: t.transform.position || { x: 0, y: 0 },
+                                    scale: t.transform.scale || { x: 1, y: 1 },
+                                    rotation: t.transform.rotation || 0,
+                                };
+                                
+                                // 完全替换滤镜属性，而不是合并
                                 return {
                                     ...t,
                                     transform: {
-                                        ...t.transform,
+                                        ...newTransform,
                                         ...preset,
                                     }
                                 };
