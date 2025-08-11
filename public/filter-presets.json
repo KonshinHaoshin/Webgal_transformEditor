@@ -46,5 +46,21 @@
     "bevel":1,
     "bevelThickness":20.3,
     "bevelSoftness":1
+  },
+  "default":{
+    "brightness":1,
+    "contrast":1,
+    "saturation":1,
+    "gamma":1,
+    "colorRed":255,
+    "colorGreen":255,
+    "colorBlue":255,
+    "bloom":0,
+    "bloomBrightness":1,
+    "bloomBlur":0,
+    "bloomThreshold":0,
+    "bevel":0,
+    "bevelThickness":0,
+    "bevelSoftness":0
   }
 }

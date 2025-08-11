@@ -4,6 +4,8 @@ import {TransformData} from "./types/transform.ts";
 import {exportScript,parseScript} from "./utils/transformParser.ts";
 import CanvasRenderer from "./components/CanvasRenderer.tsx";
 import RotationPanel from "./components/RotationPanel";
+import Modal from "./components/Modal";
+import FilterEditor from "./components/FilterEditor";
 
 export default function TransformEditor() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -37,6 +39,8 @@ export default function TransformEditor() {
     const scaleModel=1;
     const modelWidth=modelOriginalWidth*scaleModel;
     const modelHeight=modelOriginalHeight*scaleModel;
+    const [openFilterModal, setOpenFilterModal] = useState(false);
+
 
     function nextFigureName(list: TransformData[]) {
         let max = 0;
@@ -295,6 +299,7 @@ export default function TransformEditor() {
                         <option key={key} value={key}>{key}</option>
                     ))}
                 </select>
+                <button onClick={() => setOpenFilterModal(true)} style={{ marginLeft: 10 }}></button>
             </div>
 
             <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>
@@ -383,7 +388,22 @@ export default function TransformEditor() {
                             });
                         }}
                     />
+                    <Modal
+                    isOpen={openFilterModal}
+                    onClose={() => setOpenFilterModal(false)}
+                    title="滤镜编辑器"
+                    width={900}
+                    >
+                    <FilterEditor
+                        transforms={transforms}
+                        setTransforms={setTransforms}
+                        selectedIndexes={selectedIndexes}
+                        applyFilterToBg={applyFilterToBg}
+                        setApplyFilterToBg={setApplyFilterToBg}
+                    />
+                    </Modal>
                 </div>
+                
             )}
 
 
