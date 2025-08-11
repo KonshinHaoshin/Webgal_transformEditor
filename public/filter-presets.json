@@ -30,5 +30,21 @@
     "bevelRed":255,
     "bevelGreen":212,
     "bevelBlue":176
+  },
+  "Warm Glow":{
+    "brightness":0.96,
+    "contrast":1.82,
+    "saturation":2.08,
+    "gamma":1.02,
+    "colorRed":235.078,
+    "colorGreen":157.943,
+    "colorBlue":157.943,
+    "bloom":0.69,
+    "bloomBrightness":0.81,
+    "bloomBlur":19,
+    "bloomThreshold":0.93,
+    "bevel":1,
+    "bevelThickness":20.3,
+    "bevelSoftness":1
   }
 }
