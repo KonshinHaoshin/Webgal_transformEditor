@@ -1,0 +1,235 @@
+.filter-console {
+  position: fixed;            /* 固定在视口，配合 Portal 不受父容器影响 */
+  z-index: 4000;              /* 更高层级，盖在编辑器之上 */
+  width: 340px;
+  background: linear-gradient(135deg, rgba(10, 10, 10, 0.95) 0%, rgba(26, 26, 26, 0.95) 100%);
+  color: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.8), 0 0 30px rgba(0, 212, 255, 0.3);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  user-select: none;
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+.filter-console::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #00d4ff, transparent);
+  animation: scan-line 4s ease-in-out infinite;
+}
+
+@keyframes scan-line {
+  0%, 100% { transform: translateX(-100%); }
+  50% { transform: translateX(100%); }
+}
+
+.filter-console.dragging {
+  cursor: move;
+  transform: scale(1.02);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9), 0 0 40px rgba(0, 212, 255, 0.5);
+}
+
+.filter-console-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 16px 16px 12px;
+  border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+  background: rgba(0, 212, 255, 0.05);
+  position: relative;
+}
+
+.filter-console-header::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #00d4ff, transparent);
+}
+
+.filter-console-header .title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #00d4ff;
+  text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+}
+
+.drag-handle {
+  font-size: 16px;
+  opacity: 0.8;
+  padding: 0 8px;
+  cursor: move;
+  color: #00d4ff;
+  transition: all 0.3s ease;
+}
+
+.drag-handle:hover {
+  opacity: 1;
+  color: #00e6ff;
+  text-shadow: 0 0 8px rgba(0, 212, 255, 0.6);
+}
+
+.close-btn {
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.2) 0%, rgba(0, 153, 204, 0.2) 100%);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  color: #00d4ff;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 18px;
+  display: grid;
+  place-items: center;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.2);
+}
+
+.close-btn:hover {
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.3) 0%, rgba(0, 153, 204, 0.3) 100%);
+  transform: scale(1.1);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.4);
+}
+
+.close-btn:active {
+  transform: scale(0.95);
+}
+
+.filter-console-subtitle {
+  padding: 12px 16px;
+  font-size: 12px;
+  opacity: 0.8;
+  color: #cccccc;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.filter-console-body {
+  padding: 16px;
+  user-select: auto;        /* 内容可选中/编辑 */
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.filter-control {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px dashed rgba(0, 212, 255, 0.2);
+  position: relative;
+}
+
+.filter-control:last-child {
+  border-bottom: none;
+}
+
+.filter-control::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.3), transparent);
+}
+
+.filter-control label {
+  font-size: 12px;
+  opacity: 0.9;
+  color: #ffffff;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  text-shadow: 0 0 5px rgba(0, 212, 255, 0.3);
+}
+
+.filter-control input[type="range"] {
+  width: 100%;
+  height: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.filter-control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.5);
+  transition: all 0.3s ease;
+}
+
+.filter-control input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.7);
+}
+
+.filter-control input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.5);
+}
+
+/* 添加一些科技感的装饰元素 */
+.filter-console::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  background: #00d4ff;
+  border-radius: 50%;
+  opacity: 0.6;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { 
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  50% { 
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+/* 响应式设计 */
+@media (max-width: 480px) {
+  .filter-console {
+    width: 300px;
+  }
+  
+  .filter-console-header {
+    padding: 12px;
+  }
+  
+  .filter-console-body {
+    padding: 12px;
+  }
+}
+  
