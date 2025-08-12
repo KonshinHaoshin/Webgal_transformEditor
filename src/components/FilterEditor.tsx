@@ -56,6 +56,15 @@ const DEFAULTS: Record<FilterKey, number> = FILTER_DEFS.reduce((acc, d) => {
   return acc;
 }, {} as Record<FilterKey, number>);
 
+// 预设类型定义
+type FilterPreset = {
+  name: string;
+  values: Record<FilterKey, number>;
+  createdAt: string;
+  description?: string;
+  isUserPreset?: boolean; // 标识是否为用户自定义预设
+};
+
 export default function FilterEditor({
   transforms,
   setTransforms,
@@ -66,8 +75,16 @@ export default function FilterEditor({
   // 面板显示值（从当前选中或默认初始化）
   const [values, setValues] = useState<Record<FilterKey, number>>(DEFAULTS);
   
-  // 新增：选择应用范围
+  // 选择应用范围
   const [applyScope, setApplyScope] = useState<"selected" | "allFigures" | "allFiguresAndBg">("selected");
+
+  // 预设管理相关状态
+  const [allPresets, setAllPresets] = useState<Record<string, any>>({}); // 内置预设
+  const [userPresets, setUserPresets] = useState<FilterPreset[]>([]); // 用户预设
+  const [showPresetModal, setShowPresetModal] = useState(false);
+  const [newPresetName, setNewPresetName] = useState("");
+  const [newPresetDescription, setNewPresetDescription] = useState("");
+  const [selectedPreset, setSelectedPreset] = useState<string>("");
 
   // 首选"选中项的第一项"，否则使用第一个非背景项，否则就背景项
   const sourceTransform = useMemo(() => {
@@ -99,6 +116,43 @@ export default function FilterEditor({
     });
     setValues(next);
   }, [sourceTransform]);
+
+  // 加载内置预设
+  useEffect(() => {
+    fetch("/filter-presets.json")
+      .then((res) => res.json())
+      .then((data) => setAllPresets(data))
+      .catch((err) => console.error("❌ Failed to load filter presets:", err));
+  }, []);
+
+  // 加载用户自定义预设
+  useEffect(() => {
+    const savedUserPresets = localStorage.getItem("userFilterPresets");
+    if (savedUserPresets) {
+      try {
+        setUserPresets(JSON.parse(savedUserPresets));
+      } catch (e) {
+        console.error("Failed to parse saved user presets:", e);
+      }
+    }
+  }, []);
+
+  // 保存用户预设到 localStorage
+  const saveUserPresetsToStorage = (newUserPresets: FilterPreset[]) => {
+    localStorage.setItem("userFilterPresets", JSON.stringify(newUserPresets));
+  };
+
+  // 获取所有预设（内置 + 用户自定义）
+  const getAllPresets = useMemo(() => {
+    const combined: Record<string, any> = { ...allPresets };
+    
+    // 添加用户预设，使用特殊前缀避免冲突
+    userPresets.forEach(preset => {
+      combined[`[用户] ${preset.name}`] = preset.values;
+    });
+    
+    return combined;
+  }, [allPresets, userPresets]);
 
   // 应用某个键的变更：实时写回 transforms
   const applyKey = (key: FilterKey, num: number) => {
@@ -174,6 +228,99 @@ export default function FilterEditor({
     setValues(pulled);
   };
 
+  // 新增：保存当前设置为预设
+  const saveCurrentAsPreset = () => {
+    if (!newPresetName.trim()) {
+      alert("请输入预设名称！");
+      return;
+    }
+
+    // 检查是否已存在同名预设
+    if (userPresets.some(p => p.name === newPresetName.trim())) {
+      if (!confirm(`预设 "${newPresetName}" 已存在，是否覆盖？`)) {
+        return;
+      }
+      // 删除旧预设
+      const filteredPresets = userPresets.filter(p => p.name !== newPresetName.trim());
+      setUserPresets(filteredPresets);
+    }
+
+    const newPreset: FilterPreset = {
+      name: newPresetName.trim(),
+      values: { ...values },
+      createdAt: new Date().toISOString(),
+      description: newPresetDescription.trim() || undefined,
+      isUserPreset: true,
+    };
+
+    const updatedUserPresets = [...userPresets, newPreset];
+    setUserPresets(updatedUserPresets);
+    saveUserPresetsToStorage(updatedUserPresets);
+
+    // 重置表单
+    setNewPresetName("");
+    setNewPresetDescription("");
+    setShowPresetModal(false);
+
+    alert(`预设 "${newPreset.name}" 保存成功！`);
+  };
+
+  // 加载预设（支持内置预设和用户预设）
+  const loadPreset = (presetName: string) => {
+    const preset = getAllPresets[presetName];
+    if (!preset) return;
+
+    // 检查是否为用户预设
+    const isUserPreset = presetName.startsWith("[用户] ");
+    const actualPresetName = isUserPreset ? presetName.substring(4) : presetName;
+    
+    // 如果是用户预设，需要从 userPresets 中找到对应的完整信息
+    if (isUserPreset) {
+      const presetInfo = userPresets.find(p => p.name === actualPresetName);
+      if (!presetInfo) return; // 如果找不到用户预设信息，直接返回
+    }
+
+    // 应用预设到面板
+    setValues(preset);
+    
+    // 应用预设到 transforms
+    setTransforms(prev =>
+      prev.map((t, i) => {
+        let shouldApply = false;
+        
+        switch (applyScope) {
+          case "selected":
+            shouldApply = selectedIndexes.includes(i);
+            break;
+          case "allFigures":
+            shouldApply = t.target !== "bg-main";
+            break;
+          case "allFiguresAndBg":
+            shouldApply = true;
+            break;
+        }
+        
+        if (!shouldApply) return t;
+
+        const nextTransform = { ...t.transform, ...preset };
+        return { ...t, transform: nextTransform };
+      })
+    );
+
+    const displayName = isUserPreset ? actualPresetName : presetName;
+    alert(`预设 "${displayName}" 加载成功！`);
+  };
+
+  // 删除用户预设
+  const deleteUserPreset = (presetName: string) => {
+    if (!confirm(`确定要删除预设 "${presetName}" 吗？`)) return;
+
+    const updatedUserPresets = userPresets.filter(p => p.name !== presetName);
+    setUserPresets(updatedUserPresets);
+    saveUserPresetsToStorage(updatedUserPresets);
+    alert(`预设 "${presetName}" 已删除！`);
+  };
+
   return (
     <div
       style={{
@@ -246,6 +393,132 @@ export default function FilterEditor({
         </div>
       </div>
 
+      {/* 预设管理区域 */}
+      <div style={{ 
+        marginBottom: 16, 
+        padding: "12px", 
+        background: "#f8fafc", 
+        borderRadius: 6, 
+        border: "1px solid #e2e8f0" 
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+          <h4 style={{ margin: 0, fontSize: "14px", color: "#374151" }}>💾 预设管理</h4>
+          <button 
+            onClick={() => setShowPresetModal(true)}
+            style={{
+              padding: "6px 12px",
+              background: "#3b82f6",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontSize: "12px"
+            }}
+          >
+            保存当前设置
+          </button>
+        </div>
+
+        {/* 预设选择下拉框 */}
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ 
+            display: "block", 
+            fontSize: "12px", 
+            marginBottom: "4px",
+            color: "#374151"
+          }}>
+            选择预设：
+          </label>
+          <select
+            value={selectedPreset}
+            onChange={(e) => {
+              setSelectedPreset(e.target.value);
+              if (e.target.value) {
+                loadPreset(e.target.value);
+              }
+            }}
+            style={{
+              width: "100%",
+              padding: "6px 8px",
+              border: "1px solid #d1d5db",
+              borderRadius: "4px",
+              fontSize: "12px"
+            }}
+          >
+            <option value="">选择一个预设...</option>
+            {Object.keys(getAllPresets).map(key => (
+              <option key={key} value={key}>
+                {key}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* 用户预设列表 */}
+        {userPresets.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "8px" }}>
+              用户自定义预设：
+            </div>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              {userPresets.map(preset => (
+                <div key={preset.name} style={{
+                  padding: "6px 10px",
+                  background: "white",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "4px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "11px"
+                }}>
+                  <span style={{ fontWeight: "500" }}>{preset.name}</span>
+                  {preset.description && (
+                    <span style={{ color: "#6b7280", fontSize: "10px" }}>
+                      ({preset.description})
+                    </span>
+                  )}
+                  <button
+                    onClick={() => loadPreset(`[用户] ${preset.name}`)}
+                    style={{
+                      padding: "2px 4px",
+                      background: "#10b981",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "3px",
+                      cursor: "pointer",
+                      fontSize: "9px"
+                    }}
+                  >
+                    加载
+                  </button>
+                  <button
+                    onClick={() => deleteUserPreset(preset.name)}
+                    style={{
+                      padding: "2px 4px",
+                      background: "#ef4444",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "3px",
+                      cursor: "pointer",
+                      fontSize: "9px"
+                    }}
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {userPresets.length === 0 && (
+          <p style={{ margin: 0, fontSize: "12px", color: "#6b7280" }}>
+            暂无用户自定义预设，调整好参数后可以点击"保存当前设置"来创建预设
+          </p>
+        )}
+      </div>
+
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
         <h3 style={{ margin: 0 }}>Filter Editor</h3>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -301,6 +574,100 @@ export default function FilterEditor({
       <p style={{ fontSize: 12, color: "#666", marginTop: 10 }}>
         提示：选择应用范围后，滤镜效果将应用到相应的对象上。勾选"也作用于背景"才会改动 bg-main。
       </p>
+
+      {/* 保存预设的模态框 */}
+      {showPresetModal && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0, 0, 0, 0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 10000
+        }}>
+          <div style={{
+            background: "white",
+            padding: "24px",
+            borderRadius: "8px",
+            minWidth: "400px",
+            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)"
+          }}>
+            <h3 style={{ margin: "0 0 16px 0", color: "#374151" }}>保存滤镜预设</h3>
+            
+            <div style={{ marginBottom: "16px" }}>
+              <label style={{ display: "block", marginBottom: "4px", fontSize: "14px", color: "#374151" }}>
+                预设名称 *
+              </label>
+              <input
+                type="text"
+                value={newPresetName}
+                onChange={(e) => setNewPresetName(e.target.value)}
+                placeholder="输入预设名称"
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "4px",
+                  fontSize: "14px"
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{ display: "block", marginBottom: "4px", fontSize: "14px", color: "#374151" }}>
+                描述（可选）
+              </label>
+              <textarea
+                value={newPresetDescription}
+                onChange={(e) => setNewPresetDescription(e.target.value)}
+                placeholder="描述这个预设的效果..."
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "4px",
+                  fontSize: "14px",
+                  minHeight: "60px",
+                  resize: "vertical"
+                }}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
+              <button
+                onClick={() => setShowPresetModal(false)}
+                style={{
+                  padding: "8px 16px",
+                  background: "#6b7280",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer"
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={saveCurrentAsPreset}
+                style={{
+                  padding: "8px 16px",
+                  background: "#3b82f6",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer"
+                }}
+              >
+                保存预设
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
