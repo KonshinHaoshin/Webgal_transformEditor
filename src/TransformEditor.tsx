@@ -353,9 +353,10 @@ export default function TransformEditor() {
             isOpen={openFilterModal}
             onClose={() => setOpenFilterModal(false)}
             title="滤镜编辑器"
-            width={900}
+            width={500}
             variant="floating"
             draggable
+            resizable
             disableBackdrop
             mountToBody
             initialPosition={{ x: 96, y: 96 }}

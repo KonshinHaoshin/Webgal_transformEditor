@@ -5,7 +5,7 @@ type Props = {
   transforms: TransformData[];
   setTransforms: React.Dispatch<React.SetStateAction<TransformData[]>>;
   selectedIndexes: number[];
-  applyFilterToBg: boolean;                 // 复用你已有的“同时作用于背景”开关
+  applyFilterToBg: boolean;                 // 复用你已有的"同时作用于背景"开关
   setApplyFilterToBg: (v: boolean) => void; // 从父组件同步勾选框
 };
 
@@ -65,8 +65,11 @@ export default function FilterEditor({
 }: Props) {
   // 面板显示值（从当前选中或默认初始化）
   const [values, setValues] = useState<Record<FilterKey, number>>(DEFAULTS);
+  
+  // 新增：选择应用范围
+  const [applyScope, setApplyScope] = useState<"selected" | "allFigures" | "allFiguresAndBg">("selected");
 
-  // 首选“选中项的第一项”，否则使用第一个非背景项，否则就背景项
+  // 首选"选中项的第一项"，否则使用第一个非背景项，否则就背景项
   const sourceTransform = useMemo(() => {
     if (selectedIndexes.length > 0) {
       const idx = selectedIndexes[0];
@@ -74,6 +77,16 @@ export default function FilterEditor({
     }
     const firstNonBg = transforms.find(t => t.target !== "bg-main");
     return firstNonBg?.transform ?? transforms.find(t => t.target === "bg-main")?.transform;
+  }, [transforms, selectedIndexes]);
+
+  // 获取当前编辑的目标名称
+  const currentTargetName = useMemo(() => {
+    if (selectedIndexes.length > 0) {
+      const idx = selectedIndexes[0];
+      return transforms[idx]?.target || "未知目标";
+    }
+    const firstNonBg = transforms.find(t => t.target !== "bg-main");
+    return firstNonBg?.target || "未选择目标";
   }, [transforms, selectedIndexes]);
 
   // 当选择变化或 transforms 变化时，同步面板显示值（保留缺失字段的默认值）
@@ -92,12 +105,25 @@ export default function FilterEditor({
     setValues(prev => ({ ...prev, [key]: num }));
     setTransforms(prev =>
       prev.map((t, i) => {
-        // 没选中就默认作用于全部；选中了就只作用于选中
-        const hitSelection = selectedIndexes.length === 0 || selectedIndexes.includes(i);
-        if (!hitSelection) return t;
-
-        // 背景是否应用
-        if (t.target === "bg-main" && !applyFilterToBg) return t;
+        let shouldApply = false;
+        
+        // 根据应用范围决定是否应用
+        switch (applyScope) {
+          case "selected":
+            // 只对选中的对象生效
+            shouldApply = selectedIndexes.includes(i);
+            break;
+          case "allFigures":
+            // 对所有立绘生效（不包括背景）
+            shouldApply = t.target !== "bg-main";
+            break;
+          case "allFiguresAndBg":
+            // 对所有立绘和背景生效
+            shouldApply = true;
+            break;
+        }
+        
+        if (!shouldApply) return t;
 
         // 写回到 transform
         const nextTransform = { ...t.transform, [key]: num };
@@ -111,9 +137,22 @@ export default function FilterEditor({
     setValues(DEFAULTS);
     setTransforms(prev =>
       prev.map((t, i) => {
-        const hitSelection = selectedIndexes.length === 0 || selectedIndexes.includes(i);
-        if (!hitSelection) return t;
-        if (t.target === "bg-main" && !applyFilterToBg) return t;
+        let shouldApply = false;
+        
+        // 根据应用范围决定是否应用
+        switch (applyScope) {
+          case "selected":
+            shouldApply = selectedIndexes.includes(i);
+            break;
+          case "allFigures":
+            shouldApply = t.target !== "bg-main";
+            break;
+          case "allFiguresAndBg":
+            shouldApply = true;
+            break;
+        }
+        
+        if (!shouldApply) return t;
 
         const out = { ...t.transform };
         (Object.keys(DEFAULTS) as FilterKey[]).forEach(k => {
@@ -124,7 +163,7 @@ export default function FilterEditor({
     );
   };
 
-  // 从当前“源对象”拉取一次（如果你手动改了其它对象）
+  // 从当前"源对象"拉取一次（如果你手动改了其它对象）
   const syncFromSelection = () => {
     if (!sourceTransform) return;
     const pulled: Record<FilterKey, number> = { ...DEFAULTS };
@@ -145,6 +184,68 @@ export default function FilterEditor({
         background: "#fafafa",
       }}
     >
+      {/* 显示当前编辑的目标名称 */}
+      <div style={{ 
+        marginBottom: 16, 
+        padding: "8px 12px", 
+        background: "#e3f2fd", 
+        borderRadius: 6, 
+        border: "1px solid #2196f3",
+        display: "flex",
+        alignItems: "center",
+        gap: 8
+      }}>
+        <span style={{ fontSize: "14px", fontWeight: "600", color: "#1976d2" }}>🎯</span>
+        <span style={{ fontSize: "14px", color: "#1976d2" }}>
+          正在编辑: <strong>{currentTargetName}</strong>
+        </span>
+      </div>
+
+      {/* 应用范围选择 */}
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ 
+          display: "block", 
+          fontSize: "14px", 
+          fontWeight: "600", 
+          marginBottom: "8px",
+          color: "#374151"
+        }}>
+          应用范围：
+        </label>
+        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+            <input
+              type="radio"
+              name="applyScope"
+              value="selected"
+              checked={applyScope === "selected"}
+              onChange={(e) => setApplyScope(e.target.value as any)}
+            />
+            <span>仅选中对象 ({selectedIndexes.length} 个)</span>
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+            <input
+              type="radio"
+              name="applyScope"
+              value="allFigures"
+              checked={applyScope === "allFigures"}
+              onChange={(e) => setApplyScope(e.target.value as any)}
+            />
+            <span>所有立绘</span>
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+            <input
+              type="radio"
+              name="applyScope"
+              value="allFiguresAndBg"
+              checked={applyScope === "allFiguresAndBg"}
+              onChange={(e) => setApplyScope(e.target.value as any)}
+            />
+            <span>所有立绘 + 背景</span>
+          </label>
+        </div>
+      </div>
+
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
         <h3 style={{ margin: 0 }}>Filter Editor</h3>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -198,7 +299,7 @@ export default function FilterEditor({
       </div>
 
       <p style={{ fontSize: 12, color: "#666", marginTop: 10 }}>
-        提示：若未选择任何对象，则对所有对象生效；若已选择，则仅作用于选中对象。勾选“也作用于背景”才会改动 bg-main。
+        提示：选择应用范围后，滤镜效果将应用到相应的对象上。勾选"也作用于背景"才会改动 bg-main。
       </p>
     </div>
   );
