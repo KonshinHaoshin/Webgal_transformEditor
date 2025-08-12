@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type ModalProps = {
@@ -6,91 +6,156 @@ type ModalProps = {
   onClose: () => void;
   title?: string;
   width?: number | string;
+  height?: number | string;
+  variant?: "modal" | "floating";
+  draggable?: boolean;
+  disableBackdrop?: boolean;
+  mountToBody?: boolean;
+  initialPosition?: { x: number; y: number };
   children: React.ReactNode;
-  closeOnOverlay?: boolean; // 点击遮罩关闭，默认 true
 };
 
-export default function Modal({
+const Modal: React.FC<ModalProps> = ({
   isOpen,
   onClose,
   title,
-  width = 820,
+  width = 800,
+  height,
+  variant = "modal",
+  draggable = false,
+  disableBackdrop = false,
+  mountToBody = false,
+  initialPosition = { x: 80, y: 80 },
   children,
-  closeOnOverlay = true,
-}: ModalProps) {
+}) => {
+  const [pos, setPos] = useState<{ x: number; y: number }>(initialPosition);
+  const draggingRef = useRef(false);
+  const offsetRef = useRef({ dx: 0, dy: 0 });
+
   useEffect(() => {
     if (!isOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+    if (variant === "floating") {
+      const vw = window.innerWidth;
+      const w = typeof width === "number" ? width : 800;
+      setPos((p) => ({
+        x: Math.min(Math.max(p.x, 8), Math.max(8, vw - (Number(w) || 800) - 8)),
+        y: Math.max(p.y, 8),
+      }));
+    }
+  }, [isOpen, variant, width]);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!draggingRef.current) return;
+      e.preventDefault();
+      const { dx, dy } = offsetRef.current;
+      let x = e.clientX - dx;
+      let y = e.clientY - dy;
+      const vw = window.innerWidth;
+      const w = typeof width === "number" ? width : 800;
+      x = Math.min(Math.max(x, - (Number(w) || 800) + 80), vw - 40);
+      y = Math.min(Math.max(y, -200), window.innerHeight - 40);
+      setPos({ x, y });
     };
-    const prevOverflow = document.body.style.overflow;
-    document.addEventListener("keydown", onKeyDown);
-    document.body.style.overflow = "hidden";
+    const onUp = () => (draggingRef.current = false);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
     return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
     };
-  }, [isOpen, onClose]);
+  }, [width]);
 
   if (!isOpen) return null;
 
-  return createPortal(
-    <div
-      style={overlayStyle}
-      onMouseDown={(e) => {
-        if (closeOnOverlay && e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div role="dialog" aria-modal="true" style={{ ...contentStyle, width }}>
-        <div style={headerStyle}>
-          <h3 style={{ margin: 0, fontSize: 16 }}>{title}</h3>
-          <button onClick={onClose} aria-label="Close" style={closeBtnStyle}>
-            ×
-          </button>
+  const shell = (
+    <>
+      {variant === "modal" && !disableBackdrop && (
+        <div
+          onClick={onClose}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 9998 }}
+        />
+      )}
+      <div
+        style={
+          variant === "floating"
+            ? {
+                position: "fixed",
+                left: pos.x,
+                top: pos.y,
+                width,
+                height,
+                zIndex: 9999,
+                boxShadow: "0 12px 32px rgba(0,0,0,.22)",
+                background: "#fff",
+                borderRadius: 10,
+                overflow: "hidden",
+              }
+            : {
+                position: "fixed",
+                inset: 0,
+                zIndex: 9999,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                pointerEvents: "none",
+              }
+        }
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div
+          style={
+            variant === "floating"
+              ? { width: "100%", height: "100%", display: "flex", flexDirection: "column" }
+              : {
+                  width,
+                  maxHeight: "84vh",
+                  background: "#fff",
+                  borderRadius: 10,
+                  boxShadow: "0 12px 32px rgba(0,0,0,.22)",
+                  overflow: "hidden",
+                  pointerEvents: "auto",
+                }
+          }
+          role="dialog"
+          aria-modal={variant === "modal" && !disableBackdrop ? true : false}
+        >
+          <div
+            onMouseDown={(e) => {
+              if (!(variant === "floating" && draggable)) return;
+              if (e.button !== 0) return;
+              draggingRef.current = true;
+              offsetRef.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
+            }}
+            style={{
+              userSelect: "none",
+              cursor: variant === "floating" && draggable ? "move" : "default",
+              background: "#0b65ff",
+              color: "#fff",
+              padding: "10px 14px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              fontSize: 14,
+              fontWeight: 600,
+            }}
+          >
+            <span>{title ?? "Panel"}</span>
+            <button
+              onClick={onClose}
+              style={{ all: "unset", cursor: "pointer", padding: "4px 8px", borderRadius: 6, background: "rgba(255,255,255,.18)" }}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ padding: 12, overflow: "auto", maxHeight: "70vh" }}>{children}</div>
         </div>
-        <div style={bodyStyle}>{children}</div>
       </div>
-    </div>,
-    document.body
+    </>
   );
-}
 
-const overlayStyle: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.45)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1000,
+  return mountToBody ? createPortal(shell, document.body) : shell;
 };
 
-const contentStyle: React.CSSProperties = {
-  background: "#fff",
-  borderRadius: 12,
-  boxShadow: "0 12px 40px rgba(0,0,0,0.2)",
-  maxHeight: "86vh",
-  overflow: "hidden",
-};
-
-const headerStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "12px 16px",
-  borderBottom: "1px solid #eee",
-};
-
-const bodyStyle: React.CSSProperties = {
-  padding: 16,
-  overflow: "auto",
-  maxHeight: "calc(86vh - 56px)",
-};
-
-const closeBtnStyle: React.CSSProperties = {
-  border: "none",
-  background: "transparent",
-  fontSize: 22,
-  lineHeight: 1,
-  cursor: "pointer",
-};
+export default Modal;

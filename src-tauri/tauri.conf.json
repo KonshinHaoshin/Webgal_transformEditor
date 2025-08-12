@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "WebGAL运镜编辑器",
         "width": 1024,
         "height": 768,
