@@ -27,7 +27,8 @@ export function exportScript(
     canvasWidth: number,
     canvasHeight: number,
     baseWidth: number,
-    baseHeight: number
+    baseHeight: number,
+    defaultEase?: string
 ): string {
     const scaleRatioX = baseWidth / canvasWidth;
     const scaleRatioY = baseHeight / canvasHeight;
@@ -44,7 +45,9 @@ export function exportScript(
         const transformJson = JSON.stringify(roundedTransform);
 
         if (obj.type === "setTransform") {
-            return `setTransform:${transformJson} -target=${obj.target} -duration=${exportDuration} -next;`;
+            const easeValue = obj.ease || defaultEase || "easeInOut";
+            const easeParam = ` -ease=${easeValue}`;
+            return `setTransform:${transformJson} -target=${obj.target} -duration=${exportDuration}${easeParam} -next;`;
         }
 
         if (obj.type === "changeFigure") {
@@ -101,7 +104,8 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
                 type: "setTransform",
                 target: params.target,
                 duration: parseInt(params.duration || "500"),
-                transform
+                transform,
+                ease: params.ease
             };
         }
 

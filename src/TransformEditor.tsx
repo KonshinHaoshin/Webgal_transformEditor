@@ -19,6 +19,7 @@ export default function TransformEditor() {
   const [lockX, setLockX] = useState(false);
   const [lockY, setLockY] = useState(false);
   const [exportDuration, setExportDuration] = useState(500);
+  const [ease, setEase] = useState<string>("easeInOut");
   const [bgImg, setBgImg] = useState<HTMLImageElement | null>(null);
   const bgBaseScaleRef = useRef<{ x: number; y: number }>({ x: 1, y: 1 });
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
@@ -27,6 +28,11 @@ export default function TransformEditor() {
   const [lastAppliedPresetKeys, setLastAppliedPresetKeys] = useState<string[]>([]);
   const [applyFilterToBg, setApplyFilterToBg] = useState(false);
   const [openFilterModal, setOpenFilterModal] = useState(false);
+  
+  // 动画播放相关状态
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [animationStartTime, setAnimationStartTime] = useState<number | null>(null);
+  const [animationData, setAnimationData] = useState<any[]>([]);
 
   const canvasWidth = 2560;
   const canvasHeight = 1440;
@@ -49,6 +55,193 @@ export default function TransformEditor() {
     }
     return `figure${max + 1}`;
   }
+
+
+
+  // 真正的动画播放功能
+  const playAnimation = () => {
+    if (transforms.length === 0) {
+      alert("请先添加一些变换后再播放动画");
+      return;
+    }
+
+    // 过滤出所有的 setTransform 项目
+    const setTransformItems = transforms.filter(t => t.type === 'setTransform');
+    
+    if (setTransformItems.length === 0) {
+      alert("⚠️ 没有找到任何 setTransform 指令，无法播放动画");
+      return;
+    }
+
+    // 默认起始状态
+    const defaultState = {
+      position: { x: 0, y: 0 },
+      rotation: 0,
+      scale: { x: 1, y: 1 }
+    };
+
+    // 为每个变换创建动画数据
+    const newAnimationData = setTransformItems.map((transform) => {
+      const target = transform.target;
+      const duration = exportDuration;
+      // 如果 transform 有自己的 ease，使用它；否则使用全局 ease
+      let ease = transform.ease;
+      if (!ease || ease === "") {
+        ease = ease; // 保持空字符串，表示使用全局设置
+      }
+      
+      return {
+        target,
+        duration,
+        ease,
+        startState: defaultState,
+        endState: transform.transform,
+        startTime: 0,
+        endTime: duration
+      };
+    });
+
+    // 设置动画数据并开始播放
+    setAnimationData(newAnimationData);
+    setIsPlaying(true);
+    setAnimationStartTime(Date.now());
+    
+    console.log("🎬 开始播放动画:", newAnimationData);
+  };
+
+  // 停止动画
+  const stopAnimation = () => {
+    setIsPlaying(false);
+    setAnimationStartTime(null);
+    setAnimationData([]);
+    console.log("⏹️ 动画已停止");
+  };
+
+  // 缓动函数实现 - 完全匹配 popmotion
+  const easeFunctions = {
+    easeInOut: (t: number) => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t,
+    easeIn: (t: number) => t * t,
+    easeOut: (t: number) => t * (2 - t),
+    circInOut: (t: number) => t < 0.5 ? 0.5 * (1 - Math.cos(Math.PI * t)) : 0.5 * (1 + Math.cos(Math.PI * (t - 1))),
+    circIn: (t: number) => 1 - Math.sqrt(1 - t * t),
+    circOut: (t: number) => Math.sqrt(1 - (t - 1) * (t - 1)),
+    backInOut: (t: number) => t < 0.5 ? 0.5 * (2 * t * t * (3.5949095 * t - 2.5949095)) : 0.5 * (2 * (t - 1) * (t - 1) * (3.5949095 * (t - 1) + 2.5949095) + 1),
+    backIn: (t: number) => t * t * (2.5949095 * t - 1.5949095),
+    backOut: (t: number) => (t - 1) * (t - 1) * (2.5949095 * (t - 1) + 1.5949095) + 1,
+    bounceInOut: (t: number) => {
+      if (t < 0.5) return 0.5 * (1 - easeFunctions.bounceOut(1 - 2 * t));
+      return 0.5 * easeFunctions.bounceOut(2 * t - 1) + 0.5;
+    },
+    bounceIn: (t: number) => 1 - easeFunctions.bounceOut(1 - t),
+    bounceOut: (t: number) => {
+      if (t < 1 / 2.75) return 7.5625 * t * t;
+      if (t < 2 / 2.75) return 7.5625 * (t -= 1.5 / 2.75) * t + 0.75;
+      if (t < 2.5 / 2.75) return 7.5625 * (t -= 2.25 / 2.75) * t + 0.9375;
+      return 7.5625 * (t -= 2.625 / 2.75) * t + 0.984375;
+    },
+    linear: (t: number) => t,
+    anticipate: (t: number) => t * t * (2.70158 * t - 1.70158)
+  };
+
+  // 计算当前动画状态
+  const getCurrentAnimationState = () => {
+    if (!isPlaying || !animationStartTime || animationData.length === 0) {
+      return null;
+    }
+
+    const currentTime = Date.now() - animationStartTime;
+    const maxDuration = Math.max(...animationData.map(a => a.duration));
+    
+    if (currentTime >= maxDuration) {
+      // 动画结束
+      setIsPlaying(false);
+      setAnimationStartTime(null);
+      return null;
+    }
+
+         // 计算每个目标的当前状态
+     return animationData.map(animation => {
+       const { target, startState, endState, duration, ease } = animation;
+       const elapsed = Math.min(currentTime, duration);
+       const progress = elapsed / duration;
+       
+               // 应用缓动函数 - 确保 ease 值有效
+        let easedProgress = progress;
+        if (ease && ease !== "" && easeFunctions[ease as keyof typeof easeFunctions]) {
+          easedProgress = easeFunctions[ease as keyof typeof easeFunctions](progress);
+        } else {
+          // 如果没有设置 ease 或为空字符串，使用全局 ease
+          const globalEase = ease === "" ? "easeInOut" : ease;
+          if (easeFunctions[globalEase as keyof typeof easeFunctions]) {
+            easedProgress = easeFunctions[globalEase as keyof typeof easeFunctions](progress);
+          }
+        }
+      
+      // 插值计算当前位置
+      const currentPosition = {
+        x: startState.position.x + (endState.position.x - startState.position.x) * easedProgress,
+        y: startState.position.y + (endState.position.y - startState.position.y) * easedProgress
+      };
+      
+      // 插值计算当前缩放
+      const currentScale = {
+        x: startState.scale.x + (endState.scale.x - startState.scale.x) * easedProgress,
+        y: startState.scale.y + (endState.scale.y - startState.scale.y) * easedProgress
+      };
+      
+      // 插值计算当前旋转
+      const currentRotation = startState.rotation + (endState.rotation - startState.rotation) * easedProgress;
+      
+      // 插值计算滤镜效果
+      const currentFilters: any = {};
+      if (endState.brightness !== undefined) {
+        currentFilters.brightness = startState.brightness || 1 + (endState.brightness - (startState.brightness || 1)) * easedProgress;
+      }
+      if (endState.contrast !== undefined) {
+        currentFilters.contrast = startState.contrast || 1 + (endState.contrast - (startState.contrast || 1)) * easedProgress;
+      }
+      if (endState.saturation !== undefined) {
+        currentFilters.saturation = startState.saturation || 1 + (endState.saturation - (startState.saturation || 1)) * easedProgress;
+      }
+      if (endState.gamma !== undefined) {
+        currentFilters.gamma = startState.gamma || 1 + (endState.gamma - (startState.gamma || 1)) * easedProgress;
+      }
+      if (endState.colorRed !== undefined) {
+        currentFilters.colorRed = (startState.colorRed || 255) + (endState.colorRed - (startState.colorRed || 255)) * easedProgress;
+      }
+      if (endState.colorGreen !== undefined) {
+        currentFilters.colorGreen = (startState.colorGreen || 255) + (endState.colorGreen - (startState.colorGreen || 255)) * easedProgress;
+      }
+      if (endState.colorBlue !== undefined) {
+        currentFilters.colorBlue = (startState.colorBlue || 255) + (endState.colorBlue - (startState.colorBlue || 255)) * easedProgress;
+      }
+      if (endState.bevel !== undefined) {
+        currentFilters.bevel = (startState.bevel || 0) + (endState.bevel - (startState.bevel || 0)) * easedProgress;
+      }
+      if (endState.bevelThickness !== undefined) {
+        currentFilters.bevelThickness = (startState.bevelThickness || 0) + (endState.bevelThickness - (startState.bevelThickness || 0)) * easedProgress;
+      }
+      if (endState.bevelRed !== undefined) {
+        currentFilters.bevelRed = (startState.bevelRed || 255) + (endState.bevelRed - (startState.bevelRed || 255)) * easedProgress;
+      }
+      if (endState.bevelGreen !== undefined) {
+        currentFilters.bevelGreen = (startState.bevelGreen || 255) + (endState.bevelGreen - (startState.bevelGreen || 255)) * easedProgress;
+      }
+      if (endState.bevelBlue !== undefined) {
+        currentFilters.bevelBlue = (startState.bevelBlue || 255) + (endState.bevelBlue - (startState.bevelBlue || 255)) * easedProgress;
+      }
+
+      return {
+        target,
+        transform: {
+          position: currentPosition,
+          scale: currentScale,
+          rotation: currentRotation,
+          ...currentFilters
+        }
+      };
+    });
+  };
 
   useEffect(() => {
     const model = new Image();
@@ -83,6 +276,36 @@ export default function TransformEditor() {
   }, [canvasRef.current, canvasWidth, canvasHeight]);
 
   useEffect(() => {}, [transforms, dragging, modelImg]);
+
+  // 动画循环
+  useEffect(() => {
+    if (!isPlaying) return;
+
+    const animationLoop = () => {
+      const currentState = getCurrentAnimationState();
+      if (currentState) {
+        // 更新 transforms 以显示当前动画状态
+        setTransforms(prev => {
+          const newTransforms = [...prev];
+          currentState.forEach(animState => {
+            const index = newTransforms.findIndex(t => t.target === animState.target);
+            if (index !== -1) {
+              newTransforms[index] = {
+                ...newTransforms[index],
+                transform: animState.transform
+              };
+            }
+          });
+          return newTransforms;
+        });
+        
+        // 继续动画循环
+        requestAnimationFrame(animationLoop);
+      }
+    };
+
+    requestAnimationFrame(animationLoop);
+  }, [isPlaying, animationData, animationStartTime]);
 
   useEffect(() => {
     fetch("/filter-presets.json")
@@ -126,20 +349,32 @@ export default function TransformEditor() {
         onChange={(e) => setInput(e.target.value)}
       />
       <br />
-      <button
-        onClick={() => {
-          const parsed = parseScript(input, scaleX, scaleY).map((t) => {
-            const { __presetApplied, ...rest } = t as any;
-            return rest;
-          });
-          if (parsed.length === 0) alert("⚠️ 没有解析到任何 setTransform 指令！");
-          setTransforms(parsed);
-          setAllSelected(false);
-          setSelectedIndexes([]);
-        }}
-      >
-        Load Script
-      </button>
+             <button
+         onClick={() => {
+           const parsed = parseScript(input, scaleX, scaleY).map((t) => {
+             const { __presetApplied, ...rest } = t as any;
+             return rest;
+           });
+           if (parsed.length === 0) alert("⚠️ 没有解析到任何 setTransform 指令！");
+           
+                       // 检测导入的脚本中的 ease 值，并更新全局设置
+            const setTransformItems = parsed.filter(t => t.type === 'setTransform');
+            if (setTransformItems.length > 0) {
+              // 如果存在 setTransform，使用第一个的 ease 值作为全局默认值
+              const firstEase = setTransformItems[0].ease;
+              if (firstEase && firstEase !== "") {
+                setEase(firstEase);
+                console.log(`🎯 检测到导入脚本的 ease 值: ${firstEase}，已更新全局设置`);
+              }
+            }
+           
+           setTransforms(parsed);
+           setAllSelected(false);
+           setSelectedIndexes([]);
+         }}
+       >
+         Load Script
+       </button>
       <button
         onClick={() => {
           const script = exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight);
@@ -201,6 +436,30 @@ export default function TransformEditor() {
             style={{ width: 80, marginLeft: 5 }}
           />
         </label>
+                 <label style={{ marginLeft: 20 }}>
+           Ease:
+           <select
+             value={ease}
+             onChange={(e) => setEase(e.target.value)}
+             style={{ marginLeft: 5 }}
+           >
+             <option value="default">default</option>
+             <option value="easeInOut">easeInOut</option>
+             <option value="easeIn">easeIn</option>
+             <option value="easeOut">easeOut</option>
+             <option value="circInOut">circInOut</option>
+             <option value="circIn">circIn</option>
+             <option value="circOut">circOut</option>
+             <option value="backInOut">backInOut</option>
+             <option value="backIn">backIn</option>
+             <option value="backOut">backOut</option>
+             <option value="bounceInOut">bounceInOut</option>
+             <option value="bounceIn">bounceIn</option>
+             <option value="bounceOut">bounceOut</option>
+             <option value="linear">linear</option>
+             <option value="anticipate">anticipate</option>
+           </select>
+         </label>
       </div>
 
       <div style={{ marginTop: 20 }}>
@@ -238,6 +497,41 @@ export default function TransformEditor() {
 
                      {/* 内嵌悬浮面板（不变暗） */}
            <button onClick={() => setOpenFilterModal(true)}>打开滤镜编辑器</button>
+           
+                       
+
+            {/* 播放/停止动画按钮 */}
+            {!isPlaying ? (
+              <button 
+                onClick={playAnimation}
+                style={{
+                  background: "#3b82f6",
+                  color: "white",
+                  border: "none",
+                  padding: "8px 16px",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontSize: "14px"
+                }}
+              >
+                ▶️ 播放动画
+              </button>
+            ) : (
+              <button 
+                onClick={stopAnimation}
+                style={{
+                  background: "#ef4444",
+                  color: "white",
+                  border: "none",
+                  padding: "8px 16px",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontSize: "14px"
+                }}
+              >
+                ⏹️ 停止动画
+              </button>
+            )}
         </div>
 
         <label style={{ marginTop: 10, display: "block" }}>选择预设：</label>
@@ -345,6 +639,13 @@ export default function TransformEditor() {
                 return copy;
               });
             }}
+            onChangeEase={(index, newEase) => {
+              setTransforms((prev) => {
+                const copy = [...prev];
+                copy[index] = { ...copy[index], ease: newEase };
+                return copy;
+              });
+            }}
             onChangeId={() => {}}
           />
 
@@ -372,8 +673,8 @@ export default function TransformEditor() {
         </div>
       )}
 
-      <h3>Output Script:</h3>
-      <pre>{exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight)}</pre>
+             <h3>Output Script:</h3>
+       <pre>{exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight, ease === "default" ? undefined : ease)}</pre>
     </div>
   );
 }
