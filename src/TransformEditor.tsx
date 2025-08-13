@@ -646,6 +646,20 @@ export default function TransformEditor() {
                 return copy;
               });
             }}
+            onChangeScale={(index, axis, newScale) => {
+              setTransforms((prev) => {
+                const copy = [...prev];
+                if (!copy[index].transform.scale) {
+                  copy[index].transform.scale = { x: 1, y: 1 };
+                }
+                if (axis === 'x') {
+                  copy[index].transform.scale.x = newScale;
+                } else {
+                  copy[index].transform.scale.y = newScale;
+                }
+                return copy;
+              });
+            }}
             onChangeId={() => {}}
           />
 

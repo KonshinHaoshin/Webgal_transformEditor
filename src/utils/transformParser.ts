@@ -39,14 +39,21 @@ export function exportScript(
             position: {
                 x: obj.transform.position.x * scaleRatioX,
                 y: obj.transform.position.y * scaleRatioY,
-            }
+            },
+            // 确保 scale 值不被修改，保持原始的 x 和 y 值
+            scale: obj.transform.scale || { x: 1, y: 1 }
         };
         const roundedTransform = roundTransform(transform);
         const transformJson = JSON.stringify(roundedTransform);
 
         if (obj.type === "setTransform") {
-            const easeValue = obj.ease || defaultEase || "easeInOut";
-            const easeParam = ` -ease=${easeValue}`;
+            // 只有当 obj.ease 有值且不是空字符串时才添加 ease 参数
+            let easeParam = "";
+            if (obj.ease && obj.ease !== "") {
+                easeParam = ` -ease=${obj.ease}`;
+            } else if (defaultEase && defaultEase !== "default") {
+                easeParam = ` -ease=${defaultEase}`;
+            }
             return `setTransform:${transformJson} -target=${obj.target} -duration=${exportDuration}${easeParam} -next;`;
         }
 
@@ -56,7 +63,9 @@ export function exportScript(
                 position: {
                     x: obj.transform.position.x * scaleRatioX,
                     y: obj.transform.position.y * scaleRatioY,
-                }
+                },
+                // 确保 scale 值不被修改，保持原始的 x 和 y 值
+                scale: obj.transform.scale || { x: 1, y: 1 }
             };
             const roundedTransform = roundTransform(transform);
             const transformJson = JSON.stringify(roundedTransform);

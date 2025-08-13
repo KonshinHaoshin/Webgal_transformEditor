@@ -227,7 +227,8 @@ export default function CanvasRenderer(props: Props) {
             container.x = baseX + px;
             container.y = baseY + py;
             container.rotation = t.transform.rotation || 0;
-            container.scale.set(1, 1);
+            // ✅ 正确应用 scale 值，x 和 y 轴独立
+            container.scale.set(t.transform.scale?.x || 1, t.transform.scale?.y || 1);
 
 
             // 💡 设置滤镜字段（由 PixiContainer 实现）
