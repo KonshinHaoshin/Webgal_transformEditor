@@ -106,40 +106,31 @@ export default function RotationPanel({
 
                             {/* x scale 输入 */}
                             <label>
-                                x scale:
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0.1"
-                                    max="10"
-                                    value={scaleX}
-                                    onChange={(e) => {
-                                        const val = parseFloat(e.target.value);
-                                        if (!isNaN(val) && val >= 0.1 && val <= 10) {
-                                            onChangeScale(index, 'x', val);
-                                        }
-                                    }}
-                                    style={{ width: 110, marginLeft: 6 }}
-                                />
+                            x scale:
+                            <input
+                                type="number"
+                                step="any"               // ← 不限制步进
+                                value={scaleX}
+                                onChange={(e) => {
+                                const val = Number(e.target.value);
+                                if (!Number.isNaN(val)) onChangeScale(index, 'x', val); // 只避免 NaN
+                                }}
+                                style={{ width: 110, marginLeft: 6 }}
+                            />
                             </label>
 
-                            {/* y scale 输入 */}
                             <label>
-                                y scale:
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0.1"
-                                    max="10"
-                                    value={scaleY}
-                                    onChange={(e) => {
-                                        const val = parseFloat(e.target.value);
-                                        if (!isNaN(val) && val >= 0.1 && val <= 10) {
-                                            onChangeScale(index, 'y', val);
-                                        }
-                                    }}
-                                    style={{ width: 110, marginLeft: 6 }}
-                                />
+                            y scale:
+                            <input
+                                type="number"
+                                step="any"
+                                value={scaleY}
+                                onChange={(e) => {
+                                const val = Number(e.target.value);
+                                if (!Number.isNaN(val)) onChangeScale(index, 'y', val);
+                                }}
+                                style={{ width: 110, marginLeft: 6 }}
+                            />
                             </label>
 
                             {/* 重置按钮 */}
@@ -150,11 +141,13 @@ export default function RotationPanel({
                                 }}
                                 style={{
                                     padding: "4px 8px",
-                                    backgroundColor: "#f0f0f0",
-                                    border: "1px solid #ccc",
+                                    backgroundColor: "#3b82f6",
+                                    color: "white",
+                                    border: "1px solid #2563eb",
                                     borderRadius: 4,
                                     cursor: "pointer",
-                                    fontSize: "12px"
+                                    fontSize: "12px",
+                                    fontWeight: "500"
                                 }}
                             >
                                 重置为 1:1
