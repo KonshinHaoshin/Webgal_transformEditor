@@ -83,11 +83,17 @@ export default function CanvasRenderer(props: Props) {
             const mx = (e.clientX - rect.left) * (canvasWidth / rect.width);
             const my = (e.clientY - rect.top) * (canvasHeight / rect.height);
 
+            // 计算缩放增量
+            const delta = e.deltaY < 0 ? 0.05 : -0.05;
+
+            // 检查是否点击到了某个对象
+            let hitObject = false;
             for (let index = transforms.length - 1; index >= 0; index--) {
                 const obj = transforms[index];
                 const { x, y } = obj.transform.position;
                 const scale = obj.transform.scale.x;
                 const isBg = obj.target === 'bg-main';
+                
                 let baseX = canvasWidth / 2, baseY = canvasHeight / 2;
                 if (!isBg && modelImg) {
                     const imgW = modelImg.width, imgH = modelImg.height;
@@ -113,16 +119,52 @@ export default function CanvasRenderer(props: Props) {
                 }
 
                 if (mx >= cx - w / 2 && mx <= cx + w / 2 && my >= cy - h / 2 && my <= cy + h / 2) {
-                    const delta = e.deltaY < 0 ? 0.05 : -0.05;
-                    const newScale = Math.max(0.1, scale + delta);
-                    setTransforms(prev => {
-                        const copy = [...prev];
-                        copy[index].transform.scale.x = newScale;
-                        copy[index].transform.scale.y = newScale;
-                        return copy;
-                    });
+                    hitObject = true;
+                    
+                    // 如果当前对象被选中，则缩放所有选中的对象
+                    if (selectedIndexes.includes(index)) {
+                        setTransforms(prev => {
+                            const copy = [...prev];
+                            selectedIndexes.forEach(selectedIndex => {
+                                const selectedObj = copy[selectedIndex];
+                                if (selectedObj) {
+                                    const currentScale = selectedObj.transform.scale?.x || 1;
+                                    const newScale = Math.max(0.1, currentScale + delta);
+                                    copy[selectedIndex].transform.scale.x = newScale;
+                                    copy[selectedIndex].transform.scale.y = newScale;
+                                }
+                            });
+                            return copy;
+                        });
+                    } else {
+                        // 如果点击的对象没有被选中，只缩放该对象
+                        const newScale = Math.max(0.1, scale + delta);
+                        setTransforms(prev => {
+                            const copy = [...prev];
+                            copy[index].transform.scale.x = newScale;
+                            copy[index].transform.scale.y = newScale;
+                            return copy;
+                        });
+                    }
                     break;
                 }
+            }
+
+            // 如果没有点击到任何对象，但有选中的对象，则缩放所有选中的对象
+            if (!hitObject && selectedIndexes.length > 0) {
+                setTransforms(prev => {
+                    const copy = [...prev];
+                    selectedIndexes.forEach(selectedIndex => {
+                        const selectedObj = copy[selectedIndex];
+                        if (selectedObj) {
+                            const currentScale = selectedObj.transform.scale?.x || 1;
+                            const newScale = Math.max(0.1, currentScale + delta);
+                            copy[selectedIndex].transform.scale.x = newScale;
+                            copy[selectedIndex].transform.scale.y = newScale;
+                        }
+                    });
+                    return copy;
+                });
             }
         };
 
@@ -147,6 +189,8 @@ export default function CanvasRenderer(props: Props) {
         transforms.forEach((t, index) => {
             const container = new PixiContainer();
             const isBg = t.target === "bg-main";
+            
+            // 普通元素的渲染逻辑
             const img = isBg ? bgImg : modelImg;
             if (!img) return;
 

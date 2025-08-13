@@ -316,6 +316,8 @@ export default function TransformEditor() {
 
 
 
+
+
   return (
     <div
       className="transform-editor-container"
@@ -443,21 +445,21 @@ export default function TransformEditor() {
              onChange={(e) => setEase(e.target.value)}
              style={{ marginLeft: 5 }}
            >
-             <option value="default">default</option>
-             <option value="easeInOut">easeInOut</option>
-             <option value="easeIn">easeIn</option>
-             <option value="easeOut">easeOut</option>
-             <option value="circInOut">circInOut</option>
-             <option value="circIn">circIn</option>
-             <option value="circOut">circOut</option>
-             <option value="backInOut">backInOut</option>
-             <option value="backIn">backIn</option>
-             <option value="backOut">backOut</option>
-             <option value="bounceInOut">bounceInOut</option>
-             <option value="bounceIn">bounceIn</option>
-             <option value="bounceOut">bounceOut</option>
-             <option value="linear">linear</option>
-             <option value="anticipate">anticipate</option>
+             <option value="default">默认</option>
+             <option value="easeInOut">缓入缓出</option>
+             <option value="easeIn">缓入</option>
+             <option value="easeOut">缓出</option>
+             <option value="circInOut">圆形缓入缓出</option>
+             <option value="circIn">圆形缓入</option>
+             <option value="circOut">圆形缓出</option>
+             <option value="backInOut">起止回弹</option>
+             <option value="backIn">起点回弹</option>
+             <option value="backOut">终点回弹</option>
+             <option value="bounceInOut">起止弹跳</option>
+             <option value="bounceIn">起点弹跳</option>
+             <option value="bounceOut">终点弹跳</option>
+             <option value="linear">线性</option>
+             <option value="anticipate">预先反向</option>
            </select>
          </label>
       </div>

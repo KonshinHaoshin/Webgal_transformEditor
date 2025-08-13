@@ -64,22 +64,24 @@ export default function RotationPanel({
                                     style={{ marginLeft: 6 }}
                                 >
                                     <option value="default">使用全局设置</option>
-                                    <option value="easeInOut">easeInOut</option>
-                                    <option value="easeIn">easeIn</option>
-                                    <option value="easeOut">easeOut</option>
-                                    <option value="circInOut">circInOut</option>
-                                    <option value="circIn">circIn</option>
-                                    <option value="circOut">circOut</option>
-                                    <option value="backInOut">backInOut</option>
-                                    <option value="backIn">backIn</option>
-                                    <option value="backOut">backOut</option>
-                                    <option value="bounceInOut">bounceInOut</option>
-                                    <option value="bounceIn">bounceIn</option>
-                                    <option value="bounceOut">bounceOut</option>
-                                    <option value="linear">linear</option>
-                                    <option value="anticipate">anticipate</option>
+                                    <option value="easeInOut">默认</option>
+                                    <option value="easeIn">缓入</option>
+                                    <option value="easeOut">缓出</option>
+                                    <option value="circInOut">圆形缓入缓出</option>
+                                    <option value="circIn">圆形缓入</option>
+                                    <option value="circOut">圆形缓出</option>
+                                    <option value="backInOut">起止回弹</option>
+                                    <option value="backIn">起点回弹</option>
+                                    <option value="backOut">终点回弹</option>
+                                    <option value="bounceInOut">起止弹跳</option>
+                                    <option value="bounceIn">起点弹跳</option>
+                                    <option value="bounceOut">终点弹跳</option>
+                                    <option value="linear">线性</option>
+                                    <option value="anticipate">预先反向</option>
                                 </select>
                             </label>
+
+
                         </div>
                     </div>
                 );
@@ -109,7 +111,7 @@ export default function RotationPanel({
                             x scale:
                             <input
                                 type="number"
-                                step="any"               // ← 不限制步进
+                                step="any"               
                                 value={scaleX}
                                 onChange={(e) => {
                                 const val = Number(e.target.value);
