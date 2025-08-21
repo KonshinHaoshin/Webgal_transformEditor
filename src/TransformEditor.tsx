@@ -80,14 +80,14 @@ export default function TransformEditor() {
       scale: { x: 1, y: 1 }
     };
 
-    // 为每个变换创建动画数据
+    // 修复 playAnimation 函数中的 ease 处理逻辑
     const newAnimationData = setTransformItems.map((transform) => {
       const target = transform.target;
       const duration = exportDuration;
       // 如果 transform 有自己的 ease，使用它；否则使用全局 ease
       let ease = transform.ease;
-      if (!ease || ease === "") {
-        ease = ease; // 保持空字符串，表示使用全局设置
+      if (!ease || ease === "" || ease === "default") {
+        ease = ""; // 空字符串表示使用全局设置
       }
       
       return {
@@ -168,12 +168,12 @@ export default function TransformEditor() {
                // 应用缓动函数 - 确保 ease 值有效
         let easedProgress = progress;
         if (ease && ease !== "" && easeFunctions[ease as keyof typeof easeFunctions]) {
+          // 使用 transform 自己的 ease
           easedProgress = easeFunctions[ease as keyof typeof easeFunctions](progress);
         } else {
-          // 如果没有设置 ease 或为空字符串，使用全局 ease
-          const globalEase = ease === "" ? "easeInOut" : ease;
-          if (easeFunctions[globalEase as keyof typeof easeFunctions]) {
-            easedProgress = easeFunctions[globalEase as keyof typeof easeFunctions](progress);
+          // 使用全局 ease
+          if (easeFunctions[ease as keyof typeof easeFunctions]) {
+            easedProgress = easeFunctions[ease as keyof typeof easeFunctions](progress);
           }
         }
       
@@ -195,40 +195,52 @@ export default function TransformEditor() {
       // 插值计算滤镜效果
       const currentFilters: any = {};
       if (endState.brightness !== undefined) {
-        currentFilters.brightness = startState.brightness || 1 + (endState.brightness - (startState.brightness || 1)) * easedProgress;
+        currentFilters.brightness = endState.brightness; 
       }
       if (endState.contrast !== undefined) {
-        currentFilters.contrast = startState.contrast || 1 + (endState.contrast - (startState.contrast || 1)) * easedProgress;
+        currentFilters.contrast = endState.contrast; 
       }
       if (endState.saturation !== undefined) {
-        currentFilters.saturation = startState.saturation || 1 + (endState.saturation - (startState.saturation || 1)) * easedProgress;
+        currentFilters.saturation = endState.saturation; 
       }
       if (endState.gamma !== undefined) {
-        currentFilters.gamma = startState.gamma || 1 + (endState.gamma - (startState.gamma || 1)) * easedProgress;
+        currentFilters.gamma = endState.gamma; 
       }
       if (endState.colorRed !== undefined) {
-        currentFilters.colorRed = (startState.colorRed || 255) + (endState.colorRed - (startState.colorRed || 255)) * easedProgress;
+        currentFilters.colorRed = endState.colorRed; 
       }
       if (endState.colorGreen !== undefined) {
-        currentFilters.colorGreen = (startState.colorGreen || 255) + (endState.colorGreen - (startState.colorGreen || 255)) * easedProgress;
+        currentFilters.colorGreen = endState.colorGreen; 
       }
       if (endState.colorBlue !== undefined) {
-        currentFilters.colorBlue = (startState.colorBlue || 255) + (endState.colorBlue - (startState.colorBlue || 255)) * easedProgress;
+        currentFilters.colorBlue = endState.colorBlue; 
+      }
+      if (endState.bloom !== undefined) {
+        currentFilters.bloom = endState.bloom; 
+      }
+      if (endState.bloomBrightness !== undefined) {
+        currentFilters.bloomBrightness = endState.bloomBrightness; 
+      }
+      if (endState.bloomBlur !== undefined) {
+        currentFilters.bloomBlur = endState.bloomBlur; 
       }
       if (endState.bevel !== undefined) {
-        currentFilters.bevel = (startState.bevel || 0) + (endState.bevel - (startState.bevel || 0)) * easedProgress;
+        currentFilters.bevel = endState.bevel; 
       }
       if (endState.bevelThickness !== undefined) {
-        currentFilters.bevelThickness = (startState.bevelThickness || 0) + (endState.bevelThickness - (startState.bevelThickness || 0)) * easedProgress;
+        currentFilters.bevelThickness = endState.bevelThickness; 
+      }
+      if (endState.bevelRotation !== undefined) {
+        currentFilters.bevelRotation = endState.bevelRotation; 
       }
       if (endState.bevelRed !== undefined) {
-        currentFilters.bevelRed = (startState.bevelRed || 255) + (endState.bevelRed - (startState.bevelRed || 255)) * easedProgress;
+        currentFilters.bevelRed = endState.bevelRed; 
       }
       if (endState.bevelGreen !== undefined) {
-        currentFilters.bevelGreen = (startState.bevelGreen || 255) + (endState.bevelGreen - (startState.bevelGreen || 255)) * easedProgress;
+        currentFilters.bevelGreen = endState.bevelGreen; 
       }
       if (endState.bevelBlue !== undefined) {
-        currentFilters.bevelBlue = (startState.bevelBlue || 255) + (endState.bevelBlue - (startState.bevelBlue || 255)) * easedProgress;
+        currentFilters.bevelBlue = endState.bevelBlue; 
       }
 
       return {
@@ -442,7 +454,20 @@ export default function TransformEditor() {
            Ease:
            <select
              value={ease}
-             onChange={(e) => setEase(e.target.value)}
+             onChange={(e) => {
+               const newEase = e.target.value;
+               setEase(newEase);
+               
+               // 同步更新所有没有设置ease的transform对象
+               setTransforms((prev) => {
+                 return prev.map((transform) => {
+                   if (!transform.ease || transform.ease === "" || transform.ease === "default") {
+                     return { ...transform, ease: newEase };
+                   }
+                   return transform;
+                 });
+               });
+             }}
              style={{ marginLeft: 5 }}
            >
              <option value="default">默认</option>
@@ -619,6 +644,8 @@ export default function TransformEditor() {
           modelOriginalWidth={modelWidth}
           modelOriginalHeight={modelHeight}
           bgBaseScaleRef={bgBaseScaleRef}
+          lockX={lockX}
+          lockY={lockY}
         />
       </div>
 

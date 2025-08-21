@@ -18,6 +18,8 @@ interface Props {
     bgBaseScaleRef: React.MutableRefObject<{ x: number; y: number }>;
     setTransforms: React.Dispatch<React.SetStateAction<TransformData[]>>;
     setSelectedIndexes: React.Dispatch<React.SetStateAction<number[]>>;
+    lockX: boolean;
+    lockY: boolean;
 }
 
 export default function CanvasRenderer(props: Props) {
@@ -27,7 +29,7 @@ export default function CanvasRenderer(props: Props) {
         baseWidth, baseHeight, canvasWidth, canvasHeight,
         modelOriginalWidth, modelOriginalHeight,
         // @ts-ignore
-        bgBaseScaleRef, setTransforms, setSelectedIndexes
+        bgBaseScaleRef, setTransforms, setSelectedIndexes, lockX, lockY
     } = props;
 
     const appRef = useRef<PIXI.Application | null>(null);
@@ -366,8 +368,13 @@ export default function CanvasRenderer(props: Props) {
                             selectedIndexes.forEach((idx) => {
                                 const initialPos = initialPositionsRef.current[idx];
                                 if (initialPos) {
-                                    copy[idx].transform.position.x = initialPos.x + deltaX / scaleX;
-                                    copy[idx].transform.position.y = initialPos.y + deltaY / scaleY;
+                                    // 应用Lock X和Lock Y逻辑
+                                    if (!lockX) {
+                                        copy[idx].transform.position.x = initialPos.x + deltaX / scaleX;
+                                    }
+                                    if (!lockY) {
+                                        copy[idx].transform.position.y = initialPos.y + deltaY / scaleY;
+                                    }
                                 }
                             });
                             return copy;
@@ -394,7 +401,7 @@ export default function CanvasRenderer(props: Props) {
             } else {
                 stage.addChild(container);
             }        });
-    }, [transforms, modelImg, bgImg, selectedIndexes]);
+    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY]);
 
     return null;
 }

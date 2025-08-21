@@ -6,7 +6,7 @@ export interface AddFigureParams {
     stageWidth: number;
     stageHeight: number;
 
-    // 你编辑器的“基准分辨率”（== baseWidth/baseHeight）
+    // 编辑器的“基准分辨率”（== baseWidth/baseHeight）
     baseWidth: number;
     baseHeight: number;
 
@@ -14,7 +14,7 @@ export interface AddFigureParams {
     imageWidth: number;
     imageHeight: number;
 
-    // 你的“模型逻辑尺寸”（== modelOriginalWidth/Height；影响 scale 求解）
+    // “模型逻辑尺寸”（== modelOriginalWidth/Height；影响 scale 求解）
     modelOriginalWidth: number;
     modelOriginalHeight: number;
 

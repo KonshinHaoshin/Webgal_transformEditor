@@ -1,0 +1,160 @@
+/* sci-fi-theme.css - 科幻主题样式文件 */
+
+/* 科幻感色彩变量 */
+:root {
+  --sci-fi-primary: #00d4ff;
+  --sci-fi-secondary: #00ffff;
+  --sci-fi-accent: #0099cc;
+  --sci-fi-dark: #0a0a2e;
+  --sci-fi-mid: #16213e;
+  --sci-fi-light: #0f3460;
+  --sci-fi-glow: rgba(0, 212, 255, 0.3);
+  --sci-fi-glow-strong: rgba(0, 212, 255, 0.6);
+}
+
+/* 科幻感背景动画 */
+@keyframes backgroundShift {
+  0%, 100% { 
+    transform: scale(1) rotate(0deg);
+    opacity: 0.8;
+  }
+  50% { 
+    transform: scale(1.1) rotate(1deg);
+    opacity: 1;
+  }
+}
+
+@keyframes gridMove {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(100px, 100px); }
+}
+
+@keyframes scan-line {
+  0%, 100% { transform: translateX(-100%); }
+  50% { transform: translateX(100%); }
+}
+
+@keyframes borderGlow {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@keyframes pulse {
+  0%, 100% { 
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  50% { 
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+/* 科幻感装饰元素 */
+.sci-fi-decoration::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--sci-fi-primary), transparent);
+  animation: scan-line 4s ease-in-out infinite;
+}
+
+.sci-fi-decoration::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  background: var(--sci-fi-primary);
+  border-radius: 50%;
+  opacity: 0.6;
+  animation: pulse 2s ease-in-out infinite;
+  box-shadow: 0 0 20px var(--sci-fi-glow);
+}
+
+/* 科幻感按钮样式 */
+.sci-fi-button {
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.2) 0%, rgba(15, 52, 96, 0.3) 100%);
+  color: var(--sci-fi-primary);
+  border: 1px solid rgba(0, 212, 255, 0.4);
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 15px var(--sci-fi-glow);
+  text-shadow: 0 0 5px var(--sci-fi-glow);
+}
+
+.sci-fi-button:hover {
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.3) 0%, rgba(15, 52, 96, 0.4) 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 0 25px var(--sci-fi-glow-strong);
+  border-color: var(--sci-fi-primary);
+}
+
+/* 科幻感输入框样式 */
+.sci-fi-input {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 6px;
+  color: #ffffff;
+  padding: 8px 12px;
+  font-size: 14px;
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+}
+
+.sci-fi-input:focus {
+  outline: none;
+  border-color: var(--sci-fi-primary);
+  box-shadow: 0 0 15px var(--sci-fi-glow);
+  background: rgba(0, 0, 0, 0.5);
+}
+
+/* 科幻感卡片样式 */
+.sci-fi-card {
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.05) 0%, rgba(15, 52, 96, 0.1) 100%);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 16px;
+  padding: 20px;
+  backdrop-filter: blur(15px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 20px rgba(0, 212, 255, 0.1);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.sci-fi-card:hover {
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.08) 0%, rgba(15, 52, 96, 0.15) 100%);
+  border-color: rgba(0, 212, 255, 0.4);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), 0 0 30px rgba(0, 212, 255, 0.2);
+  transform: translateY(-4px);
+}
+
+/* 科幻感标题样式 */
+.sci-fi-title {
+  color: var(--sci-fi-primary);
+  text-shadow: 0 0 15px var(--sci-fi-glow);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-weight: 700;
+  position: relative;
+  margin-bottom: 20px;
+}
+
+.sci-fi-title::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 0;
+  width: 60px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--sci-fi-primary), var(--sci-fi-secondary));
+  border-radius: 1px;
+} 
