@@ -1,5 +1,6 @@
 
 import {TransformData} from "../types/transform.ts";
+import { resolveWebGALPath, resolveWebGALBackgroundPath } from "./webgalPathResolver.ts";
 // 通用保留两位小数
 export const roundToTwo = (num: number): number => {
     return Math.round(num * 100) / 100;
@@ -89,10 +90,10 @@ export function exportScript(
     }).join("\n");
 }
 
-export function parseScript(script: string, scaleX: number, scaleY: number): TransformData[] {
+export async function parseScript(script: string, scaleX: number, scaleY: number): Promise<TransformData[]> {
     const lines = script.split(";").map(line => line.trim()).filter(Boolean);
 
-    return lines.map((line) => {
+    const results = await Promise.all(lines.map(async (line) => {
         const [command, ...rest] = line.split(" -");
 
         if (command.startsWith("setTransform:")) {
@@ -110,7 +111,7 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
             };
 
             return {
-                type: "setTransform",
+                type: "setTransform" as const,
                 target: params.target,
                 duration: parseInt(params.duration || "500"),
                 transform,
@@ -119,7 +120,9 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
         }
 
         if (command.startsWith("changeFigure:")) {
-            const path = command.replace("changeFigure:", "").trim();
+            const originalPath = command.replace("changeFigure:", "").trim();
+            // 解析WebGAL路径
+            const path = await resolveWebGALPath(originalPath);
 
             const params: Record<string, string> = {};
             let transform: any = { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } };
@@ -161,7 +164,7 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
             if (!presetPosition) presetPosition = 'center';
 
             return {
-                type: "changeFigure",
+                type: "changeFigure" as const,
                 path,
                 target: params.id || "unknown",
                 duration: 0,
@@ -174,7 +177,9 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
         }
 
         if (command.startsWith("changeBg:")) {
-            const path = command.replace("changeBg:", "").trim();
+            const originalPath = command.replace("changeBg:", "").trim();
+            // 解析WebGAL背景路径
+            const path = await resolveWebGALBackgroundPath(originalPath);
 
             const params: Record<string, string> = {};
             let transform: any = { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } };
@@ -203,7 +208,7 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
             }
 
             return {
-                type: "changeBg",
+                type: "changeBg" as const,
                 path,
                 target: "bg-main",
                 duration: 0,
@@ -214,13 +219,14 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
             };
         }
 
-
-            alert("⚠️ 不支持的指令格式：" + line);
+        alert("⚠️ 不支持的指令格式：" + line);
         return {
-            type: "setTransform",
+            type: "setTransform" as const,
             target: "invalid",
             duration: 0,
             transform: { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } }
         };
-    });
+    }));
+
+    return results;
 }

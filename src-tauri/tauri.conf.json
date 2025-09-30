@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "transformeditor",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "identifier": "com.administrator.transformeditor",
   "build": {
     "beforeDevCommand": "bun run dev",
@@ -20,7 +20,8 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "capabilities": ["default"]
     }
   },
   "bundle": {
@@ -32,10 +33,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
-  },
-  "plugins": {
-    "log": null,
-    "opener": null
+    ],
+    "category": "Utility",
+    "copyright": "Copyright © 2025 DongshanRangdeng",
+    "licenseFile": "../LICENSE"
   }
 }

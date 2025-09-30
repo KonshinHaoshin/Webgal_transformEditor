@@ -6,6 +6,12 @@ import CanvasRenderer from "./components/CanvasRenderer.tsx";
 import RotationPanel from "./components/RotationPanel";
 import Modal from "./components/Modal";
 import FilterEditor from "./components/FilterEditor";
+import FileBrowser from "./components/FileBrowser";
+import { 
+  selectWebGALGameFolder, 
+  getGameFolderDisplayName,
+  clearGameConfig 
+} from "./utils/webgalPathResolver.ts";
 
 
 export default function TransformEditor() {
@@ -29,10 +35,19 @@ export default function TransformEditor() {
   const [applyFilterToBg, setApplyFilterToBg] = useState(false);
   const [openFilterModal, setOpenFilterModal] = useState(false);
   
+  // WebGAL游戏文件夹相关状态
+  const [gameFolderSelected, setGameFolderSelected] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  
   // 动画播放相关状态
   const [isPlaying, setIsPlaying] = useState(false);
   const [animationStartTime, setAnimationStartTime] = useState<number | null>(null);
   const [animationData, setAnimationData] = useState<any[]>([]);
+  // 保存原始的 transforms 数据，防止动画播放时被覆盖
+  const [originalTransforms, setOriginalTransforms] = useState<TransformData[]>([]);
+  
+  // 文件浏览器相关状态
+  const [showFileBrowser, setShowFileBrowser] = useState(false);
 
   const canvasWidth = 2560;
   const canvasHeight = 1440;
@@ -56,6 +71,31 @@ export default function TransformEditor() {
     return `figure${max + 1}`;
   }
 
+  // 处理WebGAL游戏文件夹选择
+  const handleSelectGameFolder = async () => {
+    const config = await selectWebGALGameFolder();
+    if (config) {
+      // 使用 setTimeout 延迟状态更新，避免干扰事件循环
+      setTimeout(() => {
+        setGameFolderSelected(true);
+        setStatusMessage(`✅ WebGAL游戏文件夹已选择！\n游戏文件夹: ${config.gameFolder}\n立绘文件夹: ${config.figureFolder}`);
+        // 3秒后清除状态消息
+        setTimeout(() => setStatusMessage(null), 3000);
+      }, 0);
+    } else {
+      setStatusMessage('❌ 选择文件夹失败，请确保选择的是有效的WebGAL游戏文件夹');
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  };
+
+  // 清除WebGAL游戏文件夹选择
+  const handleClearGameFolder = () => {
+    clearGameConfig();
+    setGameFolderSelected(false);
+    setStatusMessage('🗑️ WebGAL游戏文件夹选择已清除');
+    setTimeout(() => setStatusMessage(null), 3000);
+  };
+
 
 
   // 真正的动画播放功能
@@ -65,6 +105,9 @@ export default function TransformEditor() {
       return;
     }
 
+    // 保存原始的 transforms 数据
+    setOriginalTransforms([...transforms]);
+
     // 过滤出所有的 setTransform 项目
     const setTransformItems = transforms.filter(t => t.type === 'setTransform');
     
@@ -73,12 +116,48 @@ export default function TransformEditor() {
       return;
     }
 
-    // 默认起始状态
-    const defaultState = {
-      position: { x: 0, y: 0 },
-      rotation: 0,
-      scale: { x: 1, y: 1 }
-    };
+    // 创建每个 target 的当前状态快照
+    const targetCurrentStates = new Map<string, any>();
+    
+    // 遍历所有 transforms，为每个 target 记录最新的状态
+    transforms.forEach((t) => {
+      if (t.type === 'setTransform') {
+        const target = t.target;
+        // 如果这个 target 还没有记录，则记录它
+        if (!targetCurrentStates.has(target)) {
+          targetCurrentStates.set(target, {
+            position: { ...t.transform.position },
+            rotation: t.transform.rotation || 0,
+            scale: { ...t.transform.scale },
+            // 复制其他可能的属性
+            ...Object.fromEntries(
+              Object.entries(t.transform).filter(([key]) => 
+                !['position', 'rotation', 'scale'].includes(key)
+              )
+            )
+          });
+        }
+      }
+    });
+
+    // 使用脚本中定义的原始状态作为目标状态
+    // 这样动画就是从当前状态到脚本中定义的目标状态
+    const targetEndStates = new Map<string, any>();
+    setTransformItems.forEach((transform) => {
+      const target = transform.target;
+      // 使用脚本中定义的 transform 作为目标状态
+      targetEndStates.set(target, {
+        position: { ...transform.transform.position },
+        rotation: transform.transform.rotation || 0,
+        scale: { ...transform.transform.scale },
+        // 复制其他属性
+        ...Object.fromEntries(
+          Object.entries(transform.transform).filter(([key]) => 
+            !['position', 'rotation', 'scale'].includes(key)
+          )
+        )
+      });
+    });
 
     // 修复 playAnimation 函数中的 ease 处理逻辑
     const newAnimationData = setTransformItems.map((transform) => {
@@ -90,12 +169,22 @@ export default function TransformEditor() {
         ease = ""; // 空字符串表示使用全局设置
       }
       
+      // 获取当前 target 的状态作为起始状态，如果没有则使用默认值
+      const startState = targetCurrentStates.get(target) || {
+        position: { x: 0, y: 0 },
+        rotation: 0,
+        scale: { x: 1, y: 1 }
+      };
+      
+      // 获取目标状态，如果没有则使用起始状态（这样就没有动画）
+      const endState = targetEndStates.get(target) || startState;
+      
       return {
         target,
         duration,
         ease,
-        startState: defaultState,
-        endState: transform.transform,
+        startState: startState,
+        endState: endState,
         startTime: 0,
         endTime: duration
       };
@@ -107,6 +196,7 @@ export default function TransformEditor() {
     setAnimationStartTime(Date.now());
     
     console.log("🎬 开始播放动画:", newAnimationData);
+    console.log("📸 各 target 的起始状态快照:", Object.fromEntries(targetCurrentStates));
   };
 
   // 停止动画
@@ -114,6 +204,13 @@ export default function TransformEditor() {
     setIsPlaying(false);
     setAnimationStartTime(null);
     setAnimationData([]);
+    
+    // 恢复原始的 transforms 数据
+    if (originalTransforms.length > 0) {
+      setTransforms([...originalTransforms]);
+      console.log("🔄 已恢复原始数据");
+    }
+    
     console.log("⏹️ 动画已停止");
   };
 
@@ -156,6 +253,13 @@ export default function TransformEditor() {
       // 动画结束
       setIsPlaying(false);
       setAnimationStartTime(null);
+      
+      // 恢复原始的 transforms 数据
+      if (originalTransforms.length > 0) {
+        setTransforms([...originalTransforms]);
+        console.log("🔄 动画结束，已恢复原始数据");
+      }
+      
       return null;
     }
 
@@ -337,6 +441,110 @@ export default function TransformEditor() {
     >
       <h2>EASTMOUNT WEBGAL TRANSFORM EDITOR</h2>
 
+      {/* WebGAL游戏文件夹选择区域 */}
+      <div
+        style={{
+          backgroundColor: "#f0f9ff",
+          color: "#333",
+          padding: "12px 16px",
+          borderRadius: "8px",
+          fontSize: "14px",
+          border: "1px solid #bae6fd",
+          maxWidth: 780,
+          margin: "10px auto",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "10px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <span style={{ fontWeight: "bold" }}>🎮 WebGAL游戏文件夹:</span>
+          <span style={{ 
+            color: gameFolderSelected ? "#059669" : "#dc2626",
+            fontWeight: "bold" 
+          }}>
+            {gameFolderSelected ? getGameFolderDisplayName() : "未选择"}
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button
+            onClick={handleSelectGameFolder}
+            style={{
+              backgroundColor: "#3b82f6",
+              color: "white",
+              border: "none",
+              padding: "6px 12px",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontSize: "12px"
+            }}
+          >
+            选择游戏文件夹
+          </button>
+          {gameFolderSelected && (
+            <>
+              <button
+                onClick={() => setShowFileBrowser(!showFileBrowser)}
+                style={{
+                  backgroundColor: "#10b981",
+                  color: "white",
+                  border: "none",
+                  padding: "6px 12px",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontSize: "12px"
+                }}
+              >
+                {showFileBrowser ? "隐藏文件浏览器" : "显示文件浏览器"}
+              </button>
+              <button
+                onClick={handleClearGameFolder}
+                style={{
+                  backgroundColor: "#ef4444",
+                  color: "white",
+                  border: "none",
+                  padding: "6px 12px",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontSize: "12px"
+                }}
+              >
+                清除选择
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* 状态消息显示 */}
+      {statusMessage && (
+        <div
+          style={{
+            backgroundColor: statusMessage.includes('✅') ? "#f0fdf4" : statusMessage.includes('❌') ? "#fef2f2" : "#f0f9ff",
+            color: statusMessage.includes('✅') ? "#166534" : statusMessage.includes('❌') ? "#dc2626" : "#1e40af",
+            padding: "12px 16px",
+            borderRadius: "8px",
+            fontSize: "14px",
+            border: statusMessage.includes('✅') ? "1px solid #bbf7d0" : statusMessage.includes('❌') ? "1px solid #fecaca" : "1px solid #bae6fd",
+            maxWidth: 780,
+            margin: "10px auto",
+            whiteSpace: "pre-line",
+            fontWeight: "500"
+          }}
+        >
+          {statusMessage}
+        </div>
+      )}
+
+      {/* 文件浏览器 */}
+      {showFileBrowser && gameFolderSelected && (
+        <div style={{ margin: "20px auto", maxWidth: "1200px" }}>
+          <FileBrowser />
+        </div>
+      )}
+
       <p
         style={{
           backgroundColor: "#eef6ff",
@@ -353,6 +561,8 @@ export default function TransformEditor() {
         <br />・Ctrl + 滚轮：缩放模型/背景
         <br />・Alt + 拖动：旋转选中对象
         <br />・Shift + 点击：多选对象
+        <br />・选择WebGAL游戏文件夹后，changeFigure和changeBg会自动从game/figure目录查找文件
+        <br />・使用文件浏览器可以查看和预览游戏资源文件
         <br />・关注 <strong>东山燃灯寺</strong> 谢谢喵~
       </p>
 
@@ -364,8 +574,8 @@ export default function TransformEditor() {
       />
       <br />
              <button
-         onClick={() => {
-           const parsed = parseScript(input, scaleX, scaleY).map((t) => {
+         onClick={async () => {
+           const parsed = (await parseScript(input, scaleX, scaleY)).map((t) => {
              const { __presetApplied, ...rest } = t as any;
              return rest;
            });
@@ -646,6 +856,7 @@ export default function TransformEditor() {
           bgBaseScaleRef={bgBaseScaleRef}
           lockX={lockX}
           lockY={lockY}
+          gameFolderSelected={gameFolderSelected}
         />
       </div>
 

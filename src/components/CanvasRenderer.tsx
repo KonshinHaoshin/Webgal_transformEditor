@@ -1,7 +1,8 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js";
 import { TransformData } from "../types/transform";
 import { PixiContainer } from "../containers/pixiContainer.ts";
+import { loadWebGALImage, loadWebGALBackgroundImage, loadWebGALImageAsBase64 } from "../utils/webgalPathResolver.ts";
 
 interface Props {
     canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -20,6 +21,8 @@ interface Props {
     setSelectedIndexes: React.Dispatch<React.SetStateAction<number[]>>;
     lockX: boolean;
     lockY: boolean;
+    // WebGAL 相关状态
+    gameFolderSelected: boolean;
 }
 
 export default function CanvasRenderer(props: Props) {
@@ -28,13 +31,16 @@ export default function CanvasRenderer(props: Props) {
         selectedIndexes,
         baseWidth, baseHeight, canvasWidth, canvasHeight,
         modelOriginalWidth, modelOriginalHeight,
-        // @ts-ignore
-        bgBaseScaleRef, setTransforms, setSelectedIndexes, lockX, lockY
+        setTransforms, setSelectedIndexes, lockX, lockY,
+        gameFolderSelected
     } = props;
 
     const appRef = useRef<PIXI.Application | null>(null);
     const spriteMap = useRef<Record<string, PixiContainer>>({});
     const graphicsMapRef = useRef<Record<string, PIXI.Graphics>>({});
+    
+    // 动态加载的图片缓存
+    const [loadedImages, setLoadedImages] = useState<Record<string, HTMLImageElement>>({});
 
     const scaleX = canvasWidth / baseWidth;
     const scaleY = canvasHeight / baseHeight;
@@ -177,26 +183,118 @@ export default function CanvasRenderer(props: Props) {
         };
     }, [canvasRef.current, transforms, bgImg, modelImg]); // 👈 canvasRef.current 在这里作为依赖
 
+    // 动态加载图片的函数
+    const loadImageForTransform = async (transform: TransformData): Promise<HTMLImageElement | null> => {
+        if (!transform.path) {
+            console.log('❌ TransformData 没有路径:', transform);
+            return null;
+        }
+        
+        // 如果已经加载过，直接返回缓存的图片
+        if (loadedImages[transform.path]) {
+            console.log('✅ 使用缓存的图片:', transform.path);
+            return loadedImages[transform.path];
+        }
+        
+        console.log('🔄 开始加载图片:', transform.path, '类型:', transform.type);
+        
+        let img: HTMLImageElement | null = null;
+        
+        if (gameFolderSelected) {
+            // 如果选择了WebGAL文件夹，使用WebGAL路径解析
+            if (transform.target === "bg-main") {
+                console.log('🖼️ 加载背景图片:', transform.path);
+                img = await loadWebGALBackgroundImage(transform.path);
+            } else {
+                console.log('👤 加载立绘图片:', transform.path);
+                // 优先使用 base64 方法
+                img = await loadWebGALImageAsBase64(transform.path);
+                if (!img) {
+                    console.log('⚠️ Base64 方法失败，尝试 file:// 方法');
+                    img = await loadWebGALImage(transform.path);
+                }
+            }
+        } else {
+            // 如果没有选择WebGAL文件夹，使用原始路径
+            console.log('📁 使用原始路径加载图片:', transform.path);
+            img = await loadImageFromPath(transform.path);
+        }
+        
+        if (img) {
+            console.log('✅ 图片加载成功:', transform.path, '尺寸:', img.width, 'x', img.height);
+            // 缓存加载的图片
+            setLoadedImages(prev => ({ ...prev, [transform.path!]: img! }));
+        } else {
+            console.error('❌ 图片加载失败:', transform.path);
+        }
+        
+        return img;
+    };
+
+    // 加载图片的辅助函数
+    const loadImageFromPath = async (imagePath: string): Promise<HTMLImageElement | null> => {
+        return new Promise((resolve) => {
+            console.log('🖼️ 开始加载图片:', imagePath);
+            const img = new Image();
+            img.onload = () => {
+                console.log('✅ 图片加载成功:', imagePath, '尺寸:', img.width, 'x', img.height);
+                resolve(img);
+            };
+            img.onerror = (error) => {
+                console.error('❌ 图片加载失败:', imagePath, '错误:', error);
+                resolve(null);
+            };
+            // 在 Tauri 应用中，本地文件路径需要使用 file:// 协议
+            let srcPath = imagePath;
+            if (!imagePath.startsWith('http') && !imagePath.startsWith('file://')) {
+                srcPath = `file://${imagePath}`;
+            }
+            console.log('🔗 设置图片源:', srcPath);
+            img.src = srcPath;
+        });
+    };
+
     useEffect(() => {
-        if (!appRef.current || !modelImg) return;
+        if (!appRef.current) return;
 
-        const app = appRef.current;
-        const stage = app.stage;
-        stage.removeChildren();
+        const renderTransforms = async () => {
+            const app = appRef.current!;
+            const stage = app.stage;
+            stage.removeChildren();
 
-        Object.values(graphicsMapRef.current).forEach(g => g.destroy());
-        graphicsMapRef.current = {};
-        spriteMap.current = {};
+            Object.values(graphicsMapRef.current).forEach(g => g.destroy());
+            graphicsMapRef.current = {};
+            spriteMap.current = {};
 
-        transforms.forEach((t, index) => {
-            const container = new PixiContainer();
-            const isBg = t.target === "bg-main";
-            
-            // 普通元素的渲染逻辑
-            const img = isBg ? bgImg : modelImg;
-            if (!img) return;
+            for (const [index, t] of transforms.entries()) {
+                console.log(`🎬 渲染变换 ${index}:`, t);
+                const container = new PixiContainer();
+                const isBg = t.target === "bg-main";
+                
+                // 动态加载图片
+                let img: HTMLImageElement | null = null;
+                
+                if (t.path) {
+                    // 如果有路径，尝试动态加载
+                    console.log(`📂 变换 ${index} 有路径，开始加载:`, t.path);
+                    img = await loadImageForTransform(t);
+                } else {
+                    // 如果没有路径，使用预设图片
+                    console.log(`🖼️ 变换 ${index} 没有路径，使用预设图片`);
+                    img = isBg ? bgImg : modelImg;
+                }
+                
+                if (!img) {
+                    console.log(`❌ 变换 ${index} 图片加载失败，跳过渲染`);
+                    continue;
+                }
+                
+                console.log(`✅ 变换 ${index} 图片加载成功，开始创建精灵`);
 
-            const sprite = PIXI.Sprite.from(img);
+            // 创建 PIXI 纹理和精灵
+            const texture = PIXI.Texture.from(img);
+            const sprite = new PIXI.Sprite(texture);
+            console.log(`🎨 变换 ${index} 精灵创建成功，纹理尺寸:`, texture.width, 'x', texture.height);
 
             sprite.interactive = true;
             const maskGraphics = new PIXI.Graphics();
@@ -234,8 +332,9 @@ export default function CanvasRenderer(props: Props) {
                 baseY = canvasHeight / 2;
             } else {
                 // 立绘：按 addFigure 等比适配（contain），再叠加用户缩放
-                const imgW = modelImg!.width || 1;
-                const imgH = modelImg!.height || 1;
+                const imgW = img.width || 1;
+                const imgH = img.height || 1;
+                console.log(`📏 变换 ${index} 立绘尺寸:`, imgW, 'x', imgH);
 
                 const fitScale = Math.min(canvasWidth / imgW, canvasHeight / imgH); // targetScale
                 const userScale = t.transform.scale?.x ?? 1;
@@ -275,6 +374,19 @@ export default function CanvasRenderer(props: Props) {
             container.rotation = t.transform.rotation || 0;
             // ✅ 正确应用 scale 值，x 和 y 轴独立
             container.scale.set(t.transform.scale?.x || 1, t.transform.scale?.y || 1);
+            
+            console.log(`📍 变换 ${index} 最终位置:`, {
+                containerX: container.x,
+                containerY: container.y,
+                spriteWidth: sprite.width,
+                spriteHeight: sprite.height,
+                baseX,
+                baseY,
+                px,
+                py,
+                drawW,
+                drawH
+            });
 
 
             // 💡 设置滤镜字段（由 PixiContainer 实现）
@@ -400,8 +512,13 @@ export default function CanvasRenderer(props: Props) {
                 stage.addChildAt(container, 0); // 背景始终最底层
             } else {
                 stage.addChild(container);
-            }        });
-    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY]);
+            }
+        }
+        
+        // 调用异步渲染函数
+        renderTransforms();
+    };
+    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY, gameFolderSelected]);
 
     return null;
 }
