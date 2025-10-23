@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import * as PIXI from "pixi.js";
 import { TransformData } from "../types/transform";
 import { PixiContainer } from "../containers/pixiContainer.ts";
+import { GuideLineType } from "../types/guideLines";
 
 interface Props {
     canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -20,6 +21,7 @@ interface Props {
     setSelectedIndexes: React.Dispatch<React.SetStateAction<number[]>>;
     lockX: boolean;
     lockY: boolean;
+    guideLineType?: GuideLineType;
 }
 
 export default function CanvasRenderer(props: Props) {
@@ -29,7 +31,8 @@ export default function CanvasRenderer(props: Props) {
         baseWidth, baseHeight, canvasWidth, canvasHeight,
         modelOriginalWidth, modelOriginalHeight,
         // @ts-ignore
-        bgBaseScaleRef, setTransforms, setSelectedIndexes, lockX, lockY
+        bgBaseScaleRef, setTransforms, setSelectedIndexes, lockX, lockY,
+        guideLineType = 'none'
     } = props;
 
     const appRef = useRef<PIXI.Application | null>(null);
@@ -182,6 +185,10 @@ export default function CanvasRenderer(props: Props) {
 
         const app = appRef.current;
         const stage = app.stage;
+        
+        // 保存当前的辅助线
+        const existingGuideLines = stage.children.find(child => (child as any).isGuideLines);
+        
         stage.removeChildren();
 
         Object.values(graphicsMapRef.current).forEach(g => g.destroy());
@@ -400,8 +407,125 @@ export default function CanvasRenderer(props: Props) {
                 stage.addChildAt(container, 0); // 背景始终最底层
             } else {
                 stage.addChild(container);
-            }        });
+            }
+        });
+        
+        // 重新添加辅助线（如果存在）
+        if (existingGuideLines) {
+            stage.addChild(existingGuideLines);
+        }
     }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY]);
 
+    // 独立的辅助线渲染逻辑
+    useEffect(() => {
+        if (!appRef.current) return;
+
+        const app = appRef.current;
+        const stage = app.stage;
+        
+        // 移除旧的辅助线
+        const existingGuideLines = stage.children.find(child => (child as any).isGuideLines);
+        if (existingGuideLines) {
+            stage.removeChild(existingGuideLines);
+            existingGuideLines.destroy();
+        }
+
+        if (guideLineType === 'none') return;
+
+        const graphics = new PIXI.Graphics();
+        (graphics as any).isGuideLines = true; // 标记为辅助线
+        graphics.lineStyle(3, 0xff0000, 1.0); // 红色粗线条，更显眼
+
+        switch (guideLineType) {
+            case 'grid-3x3':
+                drawGuideLines(graphics, 'grid-3x3', canvasWidth, canvasHeight);
+                break;
+            case 'rule-of-thirds':
+                drawGuideLines(graphics, 'rule-of-thirds', canvasWidth, canvasHeight);
+                break;
+            case 'center-cross':
+                drawGuideLines(graphics, 'center-cross', canvasWidth, canvasHeight);
+                break;
+            case 'diagonal':
+                drawGuideLines(graphics, 'diagonal', canvasWidth, canvasHeight);
+                break;
+            case 'golden-ratio':
+                drawGuideLines(graphics, 'golden-ratio', canvasWidth, canvasHeight);
+                break;
+        }
+
+        // 确保线条被绘制
+        graphics.lineStyle(0); // 结束线条绘制
+
+        // 将辅助线添加到最顶层
+        stage.addChild(graphics);
+
+        return () => {
+            const guideLines = stage.children.find(child => (child as any).isGuideLines);
+            if (guideLines) {
+                stage.removeChild(guideLines);
+                guideLines.destroy();
+            }
+        };
+    }, [guideLineType, canvasWidth, canvasHeight]);
+
     return null;
+}
+
+// 辅助线绘制函数
+function drawGuideLines(graphics: PIXI.Graphics, type: string, width: number, height: number) {
+    switch (type) {
+        case 'grid-3x3':
+        case 'rule-of-thirds':
+            const thirdWidth = width / 3;
+            const thirdHeight = height / 3;
+            // 垂直线
+            graphics.moveTo(thirdWidth, 0);
+            graphics.lineTo(thirdWidth, height);
+            graphics.moveTo(thirdWidth * 2, 0);
+            graphics.lineTo(thirdWidth * 2, height);
+            // 水平线
+            graphics.moveTo(0, thirdHeight);
+            graphics.lineTo(width, thirdHeight);
+            graphics.moveTo(0, thirdHeight * 2);
+            graphics.lineTo(width, thirdHeight * 2);
+            break;
+        case 'center-cross':
+            const centerX = width / 2;
+            const centerY = height / 2;
+            // 垂直线
+            graphics.moveTo(centerX, 0);
+            graphics.lineTo(centerX, height);
+            // 水平线
+            graphics.moveTo(0, centerY);
+            graphics.lineTo(width, centerY);
+            break;
+        case 'diagonal':
+            // 主对角线
+            graphics.moveTo(0, 0);
+            graphics.lineTo(width, height);
+            // 副对角线
+            graphics.moveTo(width, 0);
+            graphics.lineTo(0, height);
+            break;
+        case 'golden-ratio':
+            const goldenRatio = 1.618;
+            const ratio = 1 / goldenRatio; // 约等于 0.618
+            // 水平黄金比例线
+            const goldenHeight = height * ratio;
+            graphics.moveTo(0, goldenHeight);
+            graphics.lineTo(width, goldenHeight);
+            // 垂直黄金比例线
+            const goldenWidth = width * ratio;
+            graphics.moveTo(goldenWidth, 0);
+            graphics.lineTo(goldenWidth, height);
+            // 反向黄金比例线
+            const reverseHeight = height * (1 - ratio);
+            graphics.moveTo(0, reverseHeight);
+            graphics.lineTo(width, reverseHeight);
+            const reverseWidth = width * (1 - ratio);
+            graphics.moveTo(reverseWidth, 0);
+            graphics.lineTo(reverseWidth, height);
+            break;
+    }
 }

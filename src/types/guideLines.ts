@@ -1,0 +1,1 @@
+export type GuideLineType = 'none' | 'grid-3x3' | 'rule-of-thirds' | 'center-cross' | 'diagonal' | 'golden-ratio';

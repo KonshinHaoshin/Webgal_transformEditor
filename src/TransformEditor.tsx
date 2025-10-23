@@ -6,6 +6,7 @@ import CanvasRenderer from "./components/CanvasRenderer.tsx";
 import RotationPanel from "./components/RotationPanel";
 import Modal from "./components/Modal";
 import FilterEditor from "./components/FilterEditor";
+import { GuideLineType } from "./types/guideLines";
 
 
 export default function TransformEditor() {
@@ -28,6 +29,7 @@ export default function TransformEditor() {
   const [lastAppliedPresetKeys, setLastAppliedPresetKeys] = useState<string[]>([]);
   const [applyFilterToBg, setApplyFilterToBg] = useState(false);
   const [openFilterModal, setOpenFilterModal] = useState(false);
+  const [guideLineType, setGuideLineType] = useState<GuideLineType>('none');
   
   // 动画播放相关状态
   const [isPlaying, setIsPlaying] = useState(false);
@@ -487,6 +489,22 @@ export default function TransformEditor() {
              <option value="anticipate">预先反向</option>
            </select>
          </label>
+         
+         <label style={{ marginLeft: 20 }}>
+           辅助线:
+           <select
+             value={guideLineType}
+             onChange={(e) => setGuideLineType(e.target.value as GuideLineType)}
+             style={{ marginLeft: 5 }}
+           >
+             <option value="none">无辅助线</option>
+             <option value="grid-3x3">九宫格</option>
+             <option value="rule-of-thirds">三分法</option>
+             <option value="center-cross">中心十字</option>
+             <option value="diagonal">对角线</option>
+             <option value="golden-ratio">黄金比例</option>
+           </select>
+         </label>
       </div>
 
       <div style={{ marginTop: 20 }}>
@@ -597,7 +615,7 @@ export default function TransformEditor() {
         </select>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>
+      <div style={{ display: "flex", justifyContent: "center", marginTop: 20, position: "relative" }}>
         <canvas
           ref={canvasRef}
           width={canvasWidth}
@@ -611,12 +629,14 @@ export default function TransformEditor() {
             backgroundColor: "#f8f8f8",
           }}
         />
+        
+        
         {mousePos && (
           <div
             style={{
               position: "fixed",
               top: 10,
-              right: 10,
+              left: 10,
               backgroundColor: "rgba(0, 0, 0, 0.7)",
               color: "#fff",
               padding: "6px 10px",
@@ -646,6 +666,7 @@ export default function TransformEditor() {
           bgBaseScaleRef={bgBaseScaleRef}
           lockX={lockX}
           lockY={lockY}
+          guideLineType={guideLineType}
         />
       </div>
 
