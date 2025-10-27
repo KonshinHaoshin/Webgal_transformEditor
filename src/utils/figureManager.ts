@@ -256,6 +256,9 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
 
       if (!model) continue;
 
+      // 先隐藏，等统一设置完再显示
+      model.visible = false;
+
       // 设置 anchor 或 pivot 为中心
       if (model.anchor) {
         model.anchor.set(0.5);
@@ -272,16 +275,6 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
       // 强制启用交互
       model.interactive = true;
       model.buttonMode = false;
-      
-      // ✨ 设置 PARAM_IMPORT（若 JSONL 末行提供）
-      if (paramImport !== null) {
-        try {
-          model.internalModel?.coreModel?.setParamFloat?.('PARAM_IMPORT', paramImport);
-          console.info(`设置 PARAM_IMPORT=${paramImport} ->`, modelPath);
-        } catch (e) {
-          console.warn(`设置 PARAM_IMPORT 失败(${modelPath})`, e);
-        }
-      }
 
       // 禁用角度自动控制，避免抖头
       if (model.internalModel?.angleXParamIndex !== undefined) model.internalModel.angleXParamIndex = 999;
@@ -313,6 +306,23 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
 
   if (models.length === 0) {
     throw new Error('All models failed to load');
+  }
+
+  // ✨ 统一设置 PARAM_IMPORT（若 JSONL 末行提供）
+  if (paramImport !== null) {
+    for (const model of models) {
+      try {
+        model.internalModel?.coreModel?.setParamFloat?.('PARAM_IMPORT', paramImport);
+        console.info(`设置 PARAM_IMPORT=${paramImport}`);
+      } catch (e) {
+        console.warn(`设置 PARAM_IMPORT 失败`, e);
+      }
+    }
+  }
+
+  // 统一显示所有模型
+  for (const model of models) {
+    model.visible = true;
   }
 
   return {
