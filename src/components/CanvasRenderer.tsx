@@ -379,7 +379,7 @@ export default function CanvasRenderer(props: Props) {
 
             // 🧠 注册交互
             sprite
-                .on("pointerdown", (e) => {
+                .on("pointerdown", (e: any) => {
                     const original = e.data.originalEvent as PointerEvent; // 🟡 获取原始键盘状态
                     const isAlt = original?.altKey;
                     const isShift = original?.shiftKey;
@@ -424,7 +424,7 @@ export default function CanvasRenderer(props: Props) {
                     draggingRef.current = null;
                     rotatingRef.current = false;
                 })
-                .on("pointermove", (e) => {
+                .on("pointermove", (e: any) => {
                     const i = draggingRef.current;
                     if (i === null) return;
 

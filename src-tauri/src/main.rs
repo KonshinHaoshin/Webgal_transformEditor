@@ -67,8 +67,23 @@ fn scan_directory_recursive(dir_path: String) -> Result<Vec<String>, String> {
                 walk_dir(&path, base_dir, files)?;
             } else if let Some(ext) = path.extension() {
                 let ext_lower = ext.to_string_lossy().to_lowercase();
-                // 支持所有图像文件、视频文件(gif, webm)和配置文件(json, jsonl)
-                if ["png", "jpg", "jpeg", "gif", "bmp", "webp", "webm", "json", "jsonl"].contains(&ext_lower.as_str()) {
+                
+                // 对于 JSON 文件，检查是否包含 Live2D 模型字段
+                if ext_lower.as_str() == "json" {
+                    if let Ok(content) = fs::read_to_string(&path) {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                            // 检查是否包含 model, textures, motions 字段
+                            if json.get("model").is_some() || 
+                               json.get("textures").is_some() || 
+                               json.get("motions").is_some() {
+                                let relative_path = path.strip_prefix(base_dir)
+                                    .map_err(|e| format!("计算相对路径失败: {}", e))?;
+                                files.push(relative_path.to_string_lossy().replace('\\', "/"));
+                            }
+                        }
+                    }
+                } else if ["jsonl", "png", "jpg", "jpeg", "gif", "bmp", "webp", "webm"].contains(&ext_lower.as_str()) {
+                    // 其他文件类型直接添加
                     let relative_path = path.strip_prefix(base_dir)
                         .map_err(|e| format!("计算相对路径失败: {}", e))?;
                     files.push(relative_path.to_string_lossy().replace('\\', "/"));

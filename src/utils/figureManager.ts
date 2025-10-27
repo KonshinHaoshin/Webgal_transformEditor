@@ -98,7 +98,7 @@ export class FigureManager {
     let finalPath = jsonPath;
     console.log('加载 Live2D 模型:', finalPath);
 
-    // 注册 Live2D Ticker（必须）
+    // 注册 Live2D Ticker
     const { Live2DModel } = await import('pixi-live2d-display');
     Live2DModel.registerTicker(PIXI.Ticker);
 
@@ -122,6 +122,18 @@ export class FigureManager {
     } else if (model.pivot) {
       model.pivot.set(model.width / 2, model.height / 2);
     }
+    // 禁用角度自动控制，避免抖头
+      if (model.internalModel?.angleXParamIndex !== undefined) model.internalModel.angleXParamIndex = 999;
+      if (model.internalModel?.angleYParamIndex !== undefined) model.internalModel.angleYParamIndex = 999;
+      if (model.internalModel?.angleZParamIndex !== undefined) model.internalModel.angleZParamIndex = 999;
+
+      // 关闭自动眨眼（保留统一眨眼控制权）
+      if (model.internalModel?.eyeBlink) {
+        // @ts-ignore
+        model.internalModel.eyeBlink.blinkInterval = 1000 * 60 * 60 * 24;
+        // @ts-ignore
+        model.internalModel.eyeBlink.nextBlinkTimeLeft = 1000 * 60 * 60 * 24;
+      }
 
     // 强制启用交互（防止内部设置禁用它）
     model.interactive = true;
@@ -135,87 +147,180 @@ export class FigureManager {
   }
 
   // 加载 JSONL 聚合模型
-  private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number; height: number }> {
-    if (!this.live2DManager?.isAvailable) {
-      throw new Error('Live2D is not available');
-    }
-
-    // 注册 Live2D Ticker（必须）
-    const { Live2DModel } = await import('pixi-live2d-display');
-    Live2DModel.registerTicker(PIXI.Ticker);
-
-    // 读取 JSONL 文件
-    const response = await fetch(jsonlPath);
-    const text = await response.text();
-    const lines = text.split('\n').filter(Boolean);
-
-    const models: any[] = [];
-    let maxWidth = 0;
-    let maxHeight = 0;
-
-    const jsonlBaseDir = jsonlPath.substring(0, jsonlPath.lastIndexOf('/') + 1);
-    const resolvePath = (p: string) => {
-      const normalized = String(p).replace(/^\.\//, '');
-      if (/^(https?:)?\/\//i.test(normalized) || normalized.startsWith('game/')) {
-        return normalized;
-      }
-      return jsonlBaseDir + normalized;
-    };
-
-    // 解析每行
-    for (const line of lines) {
-      try {
-        const obj = JSON.parse(line);
-        
-        // 跳过 motions/expressions 汇总行
-        if (obj?.motions || obj?.expressions) {
-          continue;
-        }
-
-        if (obj?.path) {
-          const fullPath = resolvePath(obj.path);
-          const model = await this.live2DManager.Live2DModel.from(fullPath, {
-            autoInteract: false,
-          });
-
-          if (model) {
-            // 设置 anchor 或 pivot 为中心
-            if (model.anchor) {
-              model.anchor.set(0.5);
-            } else if (model.pivot) {
-              model.pivot.set(model.width / 2, model.height / 2);
-            }
-            
-            // 强制启用交互
-            model.interactive = true;
-            model.buttonMode = false;
-            
-            models.push(model);
-            maxWidth = Math.max(maxWidth, model.width);
-            maxHeight = Math.max(maxHeight, model.height);
-          }
-        }
-      } catch (e) {
-        console.warn('JSONL 某行解析失败:', line);
-      }
-    }
-
-    if (models.length === 0) {
-      throw new Error('No valid models in JSONL file');
-    }
-
-    // 创建容器将所有模型组合在一起
-    const container = new PIXI.Container();
-    models.forEach(model => {
-      container.addChild(model);
-    });
-
-    return {
-      model: container,
-      width: maxWidth,
-      height: maxHeight
-    };
+private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number; height: number }> {
+  if (!this.live2DManager?.isAvailable) {
+    throw new Error('Live2D is not available');
   }
+
+  // 注册 Live2D Ticker（必须）
+  const { Live2DModel } = await import('pixi-live2d-display');
+  Live2DModel.registerTicker(PIXI.Ticker);
+
+  // 读取 JSONL 文件
+  const response = await fetch(jsonlPath);
+  const text = await response.text();
+  const lines = text.split('\n').filter(Boolean);
+
+  // 解析路径前缀
+  const jsonlBaseDir = jsonlPath.substring(0, jsonlPath.lastIndexOf('/') + 1);
+  const resolvePath = (p: string) => {
+    const normalized = String(p).replace(/^\.\//, '');
+    if (/^(https?:)?\/\//i.test(normalized) || normalized.startsWith('game/')) {
+      return normalized;
+    }
+    return jsonlBaseDir + normalized;
+  };
+
+  // 收集每行模型配置
+  interface ModelConfig {
+    path: string;
+    id?: string;
+    x?: number;
+    y?: number;
+    xscale?: number;
+    yscale?: number;
+    bounds?: [number, number, number, number];
+  }
+  const modelConfigs: ModelConfig[] = [];
+
+  // 末行汇总 import（PARAM_IMPORT）
+  let paramImport: number | null = null;
+
+  // 解析每行
+  for (const line of lines) {
+    try {
+      const obj = JSON.parse(line);
+      
+      // ✅ 跳过 motions/expressions 汇总行，但检查 import 参数
+      if (obj?.motions || obj?.expressions) {
+        if (obj?.import !== undefined) {
+          paramImport = Number(obj.import);
+          console.info('检测到汇总 import =', paramImport);
+        }
+        continue;
+      }
+
+      if (obj?.path) {
+        const fullPath = resolvePath(obj.path);
+        const cfg: ModelConfig = {
+          path: fullPath,
+          id: obj.id,
+          x: obj.x,
+          y: obj.y,
+          xscale: obj.xscale,
+          yscale: obj.yscale,
+        };
+
+        // 可选 bounds（如果 JSONL 行里有）
+        if (Array.isArray(obj.bounds) && obj.bounds.length === 4) {
+          cfg.bounds = [
+            Number(obj.bounds[0]), 
+            Number(obj.bounds[1]), 
+            Number(obj.bounds[2]), 
+            Number(obj.bounds[3])
+          ];
+        }
+
+        modelConfigs.push(cfg);
+      }
+    } catch (e) {
+      console.warn('JSONL 某行解析失败:', line);
+    }
+  }
+
+  if (modelConfigs.length === 0) {
+    throw new Error('No valid models in JSONL file');
+  }
+
+  // 创建容器将所有模型组合在一起
+  const container = new PIXI.Container();
+  const models: any[] = [];
+  let maxWidth = 0;
+  let maxHeight = 0;
+
+  // 逐个加载模型并应用配置
+  for (const cfg of modelConfigs) {
+    const { path: modelPath, x, y, xscale, yscale, bounds } = cfg;
+
+    try {
+      const model = await this.live2DManager.Live2DModel.from(modelPath, {
+        autoInteract: false,
+        // 如果提供了 bounds，就覆盖
+        overWriteBounds: bounds ? { 
+          x0: bounds[0], 
+          y0: bounds[1], 
+          x1: bounds[2], 
+          y1: bounds[3] 
+        } : undefined,
+      });
+
+      if (!model) continue;
+
+      // 设置 anchor 或 pivot 为中心
+      if (model.anchor) {
+        model.anchor.set(0.5);
+      } else if (model.pivot) {
+        model.pivot.set(model.width / 2, model.height / 2);
+      }
+      
+      // 应用每行配置
+      if (x !== undefined) model.x = x;
+      if (y !== undefined) model.y = y;
+      if (xscale !== undefined) model.scale.x = xscale;
+      if (yscale !== undefined) model.scale.y = yscale;
+      
+      // 强制启用交互
+      model.interactive = true;
+      model.buttonMode = false;
+      
+      // ✨ 设置 PARAM_IMPORT（若 JSONL 末行提供）
+      if (paramImport !== null) {
+        try {
+          model.internalModel?.coreModel?.setParamFloat?.('PARAM_IMPORT', paramImport);
+          console.info(`设置 PARAM_IMPORT=${paramImport} ->`, modelPath);
+        } catch (e) {
+          console.warn(`设置 PARAM_IMPORT 失败(${modelPath})`, e);
+        }
+      }
+
+      // 禁用角度自动控制，避免抖头
+      if (model.internalModel?.angleXParamIndex !== undefined) model.internalModel.angleXParamIndex = 999;
+      if (model.internalModel?.angleYParamIndex !== undefined) model.internalModel.angleYParamIndex = 999;
+      if (model.internalModel?.angleZParamIndex !== undefined) model.internalModel.angleZParamIndex = 999;
+
+      // 关闭自动眨眼（保留统一眨眼控制权）
+      if (model.internalModel?.eyeBlink) {
+        // @ts-ignore
+        model.internalModel.eyeBlink.blinkInterval = 1000 * 60 * 60 * 24;
+        // @ts-ignore
+        model.internalModel.eyeBlink.nextBlinkTimeLeft = 1000 * 60 * 60 * 24;
+      }
+
+      container.addChild(model);
+      models.push(model);
+      
+      // 更新最大尺寸（考虑位置偏移）
+      const modelRight = (model.x || 0) + model.width * Math.abs(model.scale.x || 1);
+      const modelBottom = (model.y || 0) + model.height * Math.abs(model.scale.y || 1);
+      
+      maxWidth = Math.max(maxWidth, modelRight);
+      maxHeight = Math.max(maxHeight, modelBottom);
+
+    } catch (err) {
+      console.warn(`加载模型失败：${modelPath}`, err);
+    }
+  }
+
+  if (models.length === 0) {
+    throw new Error('All models failed to load');
+  }
+
+  return {
+    model: container,
+    width: maxWidth,
+    height: maxHeight
+  };
+}
 
   // 添加或更新立绘
   async addFigure(key: string, url: string, originalPath?: string): Promise<IFigureObject | null> {
