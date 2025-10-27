@@ -236,22 +236,59 @@ export default function CanvasRenderer(props: Props) {
             
             if (!displayObject) return;
 
-            const sprite = displayObject as PIXI.Sprite;
+            // 对于 Live2D 模型，需要创建包装容器
+            let sprite: any;
+            const figure = figureManager.getFigure(t.target);
+            
+            if (figure?.sourceType === 'live2d' || figure?.sourceType === 'jsonl') {
+                // Live2D 模型：使用 Container 包装以确保事件能正确传递
+                const wrapper = new PIXI.Container();
+                wrapper.addChild(displayObject);
+                
+                // 设置交互属性
+                wrapper.interactive = true;
+                wrapper.buttonMode = false;
+                wrapper.cursor = "pointer";
+                
+                // 设置 hitArea（相对于容器中心）
+                wrapper.hitArea = new PIXI.Rectangle(
+                    -imgWidth / 2,
+                    -imgHeight / 2,
+                    imgWidth,
+                    imgHeight
+                );
+                
+                // 将 Live2D 模型放置在容器中心
+                displayObject.x = 0;
+                displayObject.y = 0;
+                
+                // 设置 pivot 点为中心（在设置尺寸之前）
+                wrapper.pivot.set(0, 0);
+                
+                // 设置容器的尺寸（用于后续的缩放计算）
+                (wrapper as any).width = imgWidth;
+                (wrapper as any).height = imgHeight;
+                
+                sprite = wrapper;
+                console.log('✅ Live2D 交互已设置:', { interactive: wrapper.interactive, hitArea: wrapper.hitArea });
+            } else {
+                // 普通图片或 GIF
+                sprite = displayObject as PIXI.Sprite;
+                sprite.interactive = true;
+                const maskGraphics = new PIXI.Graphics();
+                maskGraphics.beginFill(0xffffff);
+                maskGraphics.drawRect(-sprite.width / 2, -sprite.height / 2, sprite.width, sprite.height);
+                maskGraphics.endFill();
 
-            sprite.interactive = true;
-            const maskGraphics = new PIXI.Graphics();
-            maskGraphics.beginFill(0xffffff);
-            maskGraphics.drawRect(-sprite.width / 2, -sprite.height / 2, sprite.width, sprite.height);
-            maskGraphics.endFill();
-
-            // 设置 hitArea
-            sprite.hitArea = new PIXI.Rectangle(
-                -sprite.width / 2,
-                -sprite.height / 2,
-                sprite.width,
-                sprite.height
-            );
-            sprite.cursor = "pointer";
+                // 设置 hitArea
+                sprite.hitArea = new PIXI.Rectangle(
+                    -sprite.width / 2,
+                    -sprite.height / 2,
+                    sprite.width,
+                    sprite.height
+                );
+                sprite.cursor = "pointer";
+            }
 
             // —— 等比缩放 + 预设位（对 bg 与 非 bg 分开）——
             let drawW = 0, drawH = 0;
@@ -304,7 +341,12 @@ export default function CanvasRenderer(props: Props) {
 // 应用尺寸
             sprite.width = drawW;
             sprite.height = drawH;
-            sprite.anchor.set(0.5);
+            
+            // 对于普通图片和 GIF，设置 anchor
+            if (figure?.sourceType !== 'live2d' && figure?.sourceType !== 'jsonl') {
+                sprite.anchor?.set(0.5);
+            }
+            
             container.addChild(sprite);
 
 
@@ -339,6 +381,7 @@ export default function CanvasRenderer(props: Props) {
             // 🧠 注册交互
             sprite
                 .on("pointerdown", (e) => {
+                    console.log('🖱️ Pointerdown 事件触发:', t.target, figure?.sourceType);
                     const original = e.data.originalEvent as PointerEvent; // 🟡 获取原始键盘状态
                     const isAlt = original?.altKey;
                     const isShift = original?.shiftKey;

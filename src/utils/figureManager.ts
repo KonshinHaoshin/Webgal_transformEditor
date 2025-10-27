@@ -116,6 +116,17 @@ export class FigureManager {
       throw new Error('Failed to load Live2D model');
     }
 
+    // 设置 Live2D 模型的 anchor 或 pivot 为中心
+    if (model.anchor) {
+      model.anchor.set(0.5);
+    } else if (model.pivot) {
+      model.pivot.set(model.width / 2, model.height / 2);
+    }
+
+    // 强制启用交互（防止内部设置禁用它）
+    model.interactive = true;
+    model.buttonMode = false;
+
     return {
       model,
       width: model.width,
