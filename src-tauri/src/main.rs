@@ -1,9 +1,47 @@
 use std::fs;
 use std::path::Path;
+mod file_server;
+
+static mut FILE_SERVER_HANDLE: Option<std::thread::JoinHandle<()>> = None;
+static mut FILE_SERVER_PORT: u16 = 0;
+static mut FILE_SERVER_BASE_PATH: Option<String> = None;
 
 #[tauri::command]
 fn get_asset_path() -> String {
     "assets/example.png".to_string()
+}
+
+#[tauri::command]
+fn start_local_server(base_path: String) -> Result<String, String> {
+    unsafe {
+        // 如果服务器已经在运行，先停止它
+        if let Some(handle) = FILE_SERVER_HANDLE.take() {
+            handle.thread().unpark();
+        }
+        
+        // 查找可用端口
+        let port = find_available_port(8000).ok_or("找不到可用端口")?;
+        FILE_SERVER_PORT = port;
+        FILE_SERVER_BASE_PATH = Some(base_path.clone());
+        
+        // 启动文件服务器
+        if let Some(handle) = file_server::start_file_server(port, base_path) {
+            FILE_SERVER_HANDLE = Some(handle);
+            Ok(format!("http://127.0.0.1:{}", port))
+        } else {
+            Err("启动文件服务器失败".to_string())
+        }
+    }
+}
+
+fn find_available_port(start_port: u16) -> Option<u16> {
+    use std::net::TcpListener;
+    for port in start_port..=start_port + 100 {
+        if TcpListener::bind(format!("127.0.0.1:{}", port)).is_ok() {
+            return Some(port);
+        }
+    }
+    None
 }
 
 #[tauri::command]
@@ -50,7 +88,7 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_log::Builder::default().build())
-        .invoke_handler(tauri::generate_handler![get_asset_path, scan_directory_recursive])
+        .invoke_handler(tauri::generate_handler![get_asset_path, scan_directory_recursive, start_local_server])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

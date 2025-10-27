@@ -69,7 +69,7 @@ export default function TransformEditor() {
   // WebGAL 模式处理函数
   const handleGameFolderSelect = async (folderPath: string) => {
     setSelectedGameFolder(folderPath);
-    webgalFileManager.setGameFolder(folderPath);
+    await webgalFileManager.setGameFolder(folderPath);
     
     setTimeout(() => {
       setAvailableFigures(webgalFileManager.getFigureFiles());
@@ -111,13 +111,14 @@ export default function TransformEditor() {
         
         const blobUrl = await webgalFileManager.getFigurePath(filename);
         if (blobUrl) {
-          const figure = await figureManager.addFigure(targetKey, blobUrl);
-          if (figure && figure.rawImage) {
-            // 如果没有modelImg，设置第一个为默认
-            if (!modelImg) {
+          // 传入原始文件路径以正确识别文件类型
+          const figure = await figureManager.addFigure(targetKey, blobUrl, filename);
+          if (figure) {
+            // 对于普通图片，设置 modelImg
+            if (figure.rawImage && !modelImg) {
               setModelImg(figure.rawImage);
             }
-            console.log(`✅ 自动加载立绘: ${filename} -> ${targetKey}`);
+            console.log(`✅ 自动加载立绘: ${filename} -> ${targetKey} (${figure.sourceType})`);
           }
         } else {
           console.warn(`⚠️ 找不到立绘文件: ${filename}`);

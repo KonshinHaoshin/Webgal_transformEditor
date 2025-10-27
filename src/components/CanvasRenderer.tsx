@@ -200,18 +200,43 @@ export default function CanvasRenderer(props: Props) {
             const container = new PixiContainer();
             const isBg = t.target === "bg-main";
             
-            // 优先从 figureManager 获取立绘，否则回退到 modelImg
-            let img: HTMLImageElement | null = null;
+            // 获取立绘或背景
+            let displayObject: PIXI.DisplayObject | null = null;
+            let imgWidth = 0;
+            let imgHeight = 0;
+
             if (isBg) {
-                img = bgImg;
+                // 背景
+                if (bgImg) {
+                    displayObject = PIXI.Sprite.from(bgImg);
+                    imgWidth = bgImg.width;
+                    imgHeight = bgImg.height;
+                }
             } else {
+                // 立绘：优先从 figureManager 获取
                 const figure = figureManager.getFigure(t.target);
-                img = figure?.rawImage || modelImg;
+                if (figure) {
+                    // 使用 figureManager 的数据
+                    displayObject = figure.displayObject;
+                    imgWidth = figure.width;
+                    imgHeight = figure.height;
+
+                    // 如果是 GIF 或 Live2D，需要设置一些特殊属性
+                    if (figure.sourceType === 'gif') {
+                        // GIF 对象已经初始化，但需要设置缩放
+                        (displayObject as any).anchor?.set(0.5);
+                    }
+                } else if (modelImg) {
+                    // 回退到默认 modelImg
+                    displayObject = PIXI.Sprite.from(modelImg);
+                    imgWidth = modelImg.width;
+                    imgHeight = modelImg.height;
+                }
             }
             
-            if (!img) return;
+            if (!displayObject) return;
 
-            const sprite = PIXI.Sprite.from(img);
+            const sprite = displayObject as PIXI.Sprite;
 
             sprite.interactive = true;
             const maskGraphics = new PIXI.Graphics();
@@ -249,9 +274,9 @@ export default function CanvasRenderer(props: Props) {
                 baseY = canvasHeight / 2;
             } else {
                 // 立绘：按 addFigure 等比适配（contain），再叠加用户缩放
-                // 使用实际渲染的图片尺寸，而不是固定的 modelImg
-                const imgW = img.width || 1;
-                const imgH = img.height || 1;
+                // 使用实际渲染的图片尺寸
+                const imgW = imgWidth || 1;
+                const imgH = imgHeight || 1;
 
                 const fitScale = Math.min(canvasWidth / imgW, canvasHeight / imgH); // targetScale
                 const userScale = t.transform.scale?.x ?? 1;

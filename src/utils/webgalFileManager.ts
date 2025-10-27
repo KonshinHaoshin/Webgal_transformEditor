@@ -1,11 +1,13 @@
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
+import { getMimeType } from './fileTypeDetector';
 
 export class WebGALFileManager {
     private gameFolder: string | null = null;
     private figureFiles: string[] = [];
     private backgroundFiles: string[] = [];
+    private fileServerBaseUrl: string | null = null;
 
     async selectGameFolder(): Promise<string | null> {
         try {
@@ -28,9 +30,19 @@ export class WebGALFileManager {
         return null;
     }
 
-    setGameFolder(folderPath: string): void {
+    async setGameFolder(folderPath: string): Promise<void> {
         this.gameFolder = folderPath;
-        this.scanFiles();
+        
+        // 启动本地文件服务器
+        try {
+            const serverUrl = await invoke<string>('start_local_server', { basePath: folderPath });
+            this.fileServerBaseUrl = serverUrl;
+            console.log('✅ 本地文件服务器已启动:', serverUrl);
+        } catch (error) {
+            console.error('启动文件服务器失败:', error);
+        }
+        
+        await this.scanFiles();
     }
 
     private async scanFiles(): Promise<void> {
@@ -47,6 +59,7 @@ export class WebGALFileManager {
             try {
                 this.figureFiles = await invoke('scan_directory_recursive', { dirPath: figurePath }) as string[];
                 console.log(`✅ 找到 ${this.figureFiles.length} 个立绘文件`);
+                console.log('📋 前 5 个文件路径:', this.figureFiles.slice(0, 5));
             } catch (error) {
                 console.warn('无法读取立绘文件夹:', error);
                 this.figureFiles = [];
@@ -82,6 +95,22 @@ export class WebGALFileManager {
             return null;
         }
         
+        // Live2D 文件需要使用 HTTP URL
+        const ext = found.split('.').pop()?.toLowerCase();
+        if (ext === 'json' || ext === 'jsonl') {
+            if (this.fileServerBaseUrl) {
+                // 使用本地文件服务器 URL（服务器 base_path 是游戏目录，需要加上 game/figure 前缀）
+                console.log('🔍 扫描到的文件路径:', found);
+                console.log('🔍 游戏目录:', this.gameFolder);
+                const httpUrl = `${this.fileServerBaseUrl}/game/figure/${found}`;
+                console.log('✅ Live2D 文件使用 HTTP URL:', httpUrl);
+                return httpUrl;
+            } else {
+                console.warn('⚠️ 文件服务器未启动，Live2D 可能无法加载');
+                return null;
+            }
+        }
+        
         return await this.getImageAsBlobUrl('figure', found);
     }
 
@@ -113,7 +142,7 @@ export class WebGALFileManager {
             const fileData = await readFile(filePath);
             
             const blob = new Blob([fileData], { 
-                type: this.getMimeType(filename) 
+                type: this.getMimeTypeForFile(filename) 
             });
             
             const blobUrl = URL.createObjectURL(blob);
@@ -126,20 +155,9 @@ export class WebGALFileManager {
         }
     }
 
-    private getMimeType(filename: string): string {
-        const ext = filename.toLowerCase().split('.').pop();
-        switch (ext) {
-            case 'png': return 'image/png';
-            case 'jpg':
-            case 'jpeg': return 'image/jpeg';
-            case 'gif': return 'image/gif';
-            case 'bmp': return 'image/bmp';
-            case 'webp': return 'image/webp';
-            case 'webm': return 'video/webm';
-            case 'json': return 'application/json';
-            case 'jsonl': return 'application/x-ndjson';
-            default: return 'image/png';
-        }
+    private getMimeTypeForFile(filename: string): string {
+        // 使用新的文件类型检测器
+        return getMimeType(filename);
     }
 
     getFigureFiles(): string[] {
