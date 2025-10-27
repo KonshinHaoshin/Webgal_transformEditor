@@ -135,7 +135,7 @@ export class FigureManager {
   }
 
   // 加载 JSONL 聚合模型
-  private async loadJsonl(jsonlPath: string): Promise<{ models: any[]; width: number; height: number }> {
+  private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number; height: number }> {
     if (!this.live2DManager?.isAvailable) {
       throw new Error('Live2D is not available');
     }
@@ -179,6 +179,17 @@ export class FigureManager {
           });
 
           if (model) {
+            // 设置 anchor 或 pivot 为中心
+            if (model.anchor) {
+              model.anchor.set(0.5);
+            } else if (model.pivot) {
+              model.pivot.set(model.width / 2, model.height / 2);
+            }
+            
+            // 强制启用交互
+            model.interactive = true;
+            model.buttonMode = false;
+            
             models.push(model);
             maxWidth = Math.max(maxWidth, model.width);
             maxHeight = Math.max(maxHeight, model.height);
@@ -193,8 +204,14 @@ export class FigureManager {
       throw new Error('No valid models in JSONL file');
     }
 
+    // 创建容器将所有模型组合在一起
+    const container = new PIXI.Container();
+    models.forEach(model => {
+      container.addChild(model);
+    });
+
     return {
-      models,
+      model: container,
       width: maxWidth,
       height: maxHeight
     };
@@ -259,18 +276,16 @@ export class FigureManager {
           }
 
           case 'jsonl': {
-            const { models, width, height } = await this.loadJsonl(url);
-            // JSONL 返回多个模型，这里暂存第一个（实际渲染时可能需要特殊处理）
+            const { model, width, height } = await this.loadJsonl(url);
+            // JSONL 返回一个包含所有模型的容器
             figure = {
               key,
               sourceUrl: url,
               sourceType,
-              displayObject: models[0], // 暂时只存储第一个
+              displayObject: model,
               width,
               height
             };
-            // 将其他模型存储到特殊字段
-            (figure as any).allModels = models;
             break;
           }
 

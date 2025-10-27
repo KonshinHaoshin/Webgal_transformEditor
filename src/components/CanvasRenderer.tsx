@@ -270,7 +270,6 @@ export default function CanvasRenderer(props: Props) {
                 (wrapper as any).height = imgHeight;
                 
                 sprite = wrapper;
-                console.log('✅ Live2D 交互已设置:', { interactive: wrapper.interactive, hitArea: wrapper.hitArea });
             } else {
                 // 普通图片或 GIF
                 sprite = displayObject as PIXI.Sprite;
@@ -381,7 +380,6 @@ export default function CanvasRenderer(props: Props) {
             // 🧠 注册交互
             sprite
                 .on("pointerdown", (e) => {
-                    console.log('🖱️ Pointerdown 事件触发:', t.target, figure?.sourceType);
                     const original = e.data.originalEvent as PointerEvent; // 🟡 获取原始键盘状态
                     const isAlt = original?.altKey;
                     const isShift = original?.shiftKey;
