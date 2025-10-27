@@ -14,6 +14,9 @@
     "fs:allow-exists",
     "fs:allow-watch",
     "fs:read-dirs",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:default",
     {
       "identifier": "fs:scope",
       "allow": ["**/*"]

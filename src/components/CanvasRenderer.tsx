@@ -3,6 +3,7 @@ import * as PIXI from "pixi.js";
 import { TransformData } from "../types/transform";
 import { PixiContainer } from "../containers/pixiContainer.ts";
 import { GuideLineType } from "../types/guideLines";
+import { figureManager } from "../utils/figureManager";
 
 interface Props {
     canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -199,8 +200,15 @@ export default function CanvasRenderer(props: Props) {
             const container = new PixiContainer();
             const isBg = t.target === "bg-main";
             
-            // 普通元素的渲染逻辑
-            const img = isBg ? bgImg : modelImg;
+            // 优先从 figureManager 获取立绘，否则回退到 modelImg
+            let img: HTMLImageElement | null = null;
+            if (isBg) {
+                img = bgImg;
+            } else {
+                const figure = figureManager.getFigure(t.target);
+                img = figure?.rawImage || modelImg;
+            }
+            
             if (!img) return;
 
             const sprite = PIXI.Sprite.from(img);
@@ -241,8 +249,9 @@ export default function CanvasRenderer(props: Props) {
                 baseY = canvasHeight / 2;
             } else {
                 // 立绘：按 addFigure 等比适配（contain），再叠加用户缩放
-                const imgW = modelImg!.width || 1;
-                const imgH = modelImg!.height || 1;
+                // 使用实际渲染的图片尺寸，而不是固定的 modelImg
+                const imgW = img.width || 1;
+                const imgH = img.height || 1;
 
                 const fitScale = Math.min(canvasWidth / imgW, canvasHeight / imgH); // targetScale
                 const userScale = t.transform.scale?.x ?? 1;

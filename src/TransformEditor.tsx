@@ -7,6 +7,9 @@ import RotationPanel from "./components/RotationPanel";
 import Modal from "./components/Modal";
 import FilterEditor from "./components/FilterEditor";
 import { GuideLineType } from "./types/guideLines";
+import WebGALMode from "./components/WebGALMode";
+import { webgalFileManager } from "./utils/webgalFileManager";
+import { figureManager } from "./utils/figureManager";
 
 
 export default function TransformEditor() {
@@ -36,6 +39,11 @@ export default function TransformEditor() {
   const [animationStartTime, setAnimationStartTime] = useState<number | null>(null);
   const [animationData, setAnimationData] = useState<any[]>([]);
 
+  // WebGAL 模式相关状态
+  const [selectedGameFolder, setSelectedGameFolder] = useState<string | null>(null);
+  const [availableFigures, setAvailableFigures] = useState<string[]>([]);
+  const [availableBackgrounds, setAvailableBackgrounds] = useState<string[]>([]);
+
   const canvasWidth = 2560;
   const canvasHeight = 1440;
   const baseWidth = 2560;
@@ -58,7 +66,82 @@ export default function TransformEditor() {
     return `figure${max + 1}`;
   }
 
+  // WebGAL 模式处理函数
+  const handleGameFolderSelect = async (folderPath: string) => {
+    setSelectedGameFolder(folderPath);
+    webgalFileManager.setGameFolder(folderPath);
+    
+    setTimeout(() => {
+      setAvailableFigures(webgalFileManager.getFigureFiles());
+      setAvailableBackgrounds(webgalFileManager.getBackgroundFiles());
+    }, 500);
+  };
 
+  const handleFileSelect = async (type: 'figure' | 'background', filename: string) => {
+    const blobUrl = await webgalFileManager[type === 'figure' ? 'getFigurePath' : 'getBackgroundPath'](filename);
+    if (blobUrl) {
+      const img = new Image();
+      img.onload = () => {
+        if (type === 'figure') {
+          setModelImg(img);
+          console.log(`✅ 已加载立绘: ${filename}`);
+        } else {
+          setBgImg(img);
+          console.log(`✅ 已加载背景: ${filename}`);
+        }
+      };
+      img.src = blobUrl;
+    }
+  };
+
+  const parseAndLoadImages = async (script: string) => {
+    if (!selectedGameFolder) return;
+
+    const lines = script.split(";").map(line => line.trim()).filter(Boolean);
+    
+    for (const line of lines) {
+      const figureMatch = line.match(/changeFigure:\s*([^\s,]+)/i);
+      if (figureMatch) {
+        const filename = figureMatch[1];
+        console.log(`🔍 检测到 changeFigure 命令: ${filename}`);
+        
+        // 解析 target (id)
+        const idMatch = line.match(/-id=([^\s,]+)/i);
+        const targetKey = idMatch ? idMatch[1] : filename;
+        
+        const blobUrl = await webgalFileManager.getFigurePath(filename);
+        if (blobUrl) {
+          const figure = await figureManager.addFigure(targetKey, blobUrl);
+          if (figure && figure.rawImage) {
+            // 如果没有modelImg，设置第一个为默认
+            if (!modelImg) {
+              setModelImg(figure.rawImage);
+            }
+            console.log(`✅ 自动加载立绘: ${filename} -> ${targetKey}`);
+          }
+        } else {
+          console.warn(`⚠️ 找不到立绘文件: ${filename}`);
+        }
+      }
+
+      const bgMatch = line.match(/changeBackground:\s*([^\s,]+)/i) || line.match(/changeBg:\s*([^\s,]+)/i);
+      if (bgMatch) {
+        const filename = bgMatch[1];
+        console.log(`🔍 检测到背景切换命令: ${filename}`);
+        const blobUrl = await webgalFileManager.getBackgroundPath(filename);
+        if (blobUrl) {
+          const img = new Image();
+          img.onload = () => {
+            setBgImg(img);
+            console.log(`✅ 自动加载背景: ${filename}`);
+          };
+          img.src = blobUrl;
+        } else {
+          console.warn(`⚠️ 找不到背景文件: ${filename}`);
+        }
+      }
+    }
+  };
 
   // 真正的动画播放功能
   const playAnimation = () => {
@@ -365,8 +448,16 @@ export default function TransformEditor() {
         onChange={(e) => setInput(e.target.value)}
       />
       <br />
+      <WebGALMode
+        onFolderSelect={handleGameFolderSelect}
+        onFileSelect={handleFileSelect}
+        selectedFolder={selectedGameFolder}
+        availableFigures={availableFigures}
+        availableBackgrounds={availableBackgrounds}
+      />
+      <br />
              <button
-         onClick={() => {
+         onClick={async () => {
            const parsed = parseScript(input, scaleX, scaleY).map((t) => {
              const { __presetApplied, ...rest } = t as any;
              return rest;
@@ -383,6 +474,11 @@ export default function TransformEditor() {
                 console.log(`🎯 检测到导入脚本的 ease 值: ${firstEase}，已更新全局设置`);
               }
             }
+           
+           // 如果启用了 WebGAL 模式，自动加载图片
+           if (selectedGameFolder) {
+             await parseAndLoadImages(input);
+           }
            
            setTransforms(parsed);
            setAllSelected(false);
