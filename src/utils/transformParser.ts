@@ -44,6 +44,7 @@ export function exportScript(
             return obj.rawText;
         }
 
+        // 构建导出用的 transform 对象，确保保留所有属性（包括滤镜参数）
         const transform = {
             ...obj.transform,
             position: {
@@ -52,6 +53,8 @@ export function exportScript(
             },
             // 确保 scale 值不被修改，保持原始的 x 和 y 值
             scale: obj.transform.scale || { x: 1, y: 1 }
+            // 其他所有属性（brightness, contrast, saturation, gamma, colorRed, colorGreen, colorBlue 等）
+            // 都通过 ...obj.transform 被保留
         };
         const roundedTransform = roundTransform(transform);
         const transformJson = JSON.stringify(roundedTransform);

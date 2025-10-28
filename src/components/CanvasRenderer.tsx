@@ -72,6 +72,10 @@ export default function CanvasRenderer(props: Props) {
             autoDensity: true,
         });
 
+        // 确保 stage 可以接收全局事件，用于拖拽
+        app.stage.interactive = true;
+        app.stage.hitArea = new PIXI.Rectangle(0, 0, canvasWidth, canvasHeight);
+
         appRef.current = app;
     }, []); // 👈 注意只初始化一次 Pixi
 
@@ -416,62 +420,70 @@ export default function CanvasRenderer(props: Props) {
                         rotationStartAngleRef.current = Math.atan2(local.y - cy, local.x - cx);
                         initialRotationRef.current = t.transform.rotation || 0;
                     } else {
-                        // ✅ 多选或单选
+                        // ✅ 多选或单选（只在未选中时更新选中状态）
                         if (isShift) {
                             setSelectedIndexes((prev) =>
                                 prev.includes(index) ? prev : [...prev, index]
                             );
-                        } else {
+                        } else if (!selectedIndexes.includes(index)) {
+                            // 如果已经选中，不重新设置，保持拖拽
                             setSelectedIndexes([index]);
                         }
                     }
-                })
-                .on("pointerup", () => {
-                    draggingRef.current = null;
-                    rotatingRef.current = false;
-                })
-                .on("pointerupoutside", () => {
-                    draggingRef.current = null;
-                    rotatingRef.current = false;
-                })
-                .on("pointermove", (e: any) => {
-                    const i = draggingRef.current;
-                    if (i === null) return;
 
-                    const local = e.data.getLocalPosition(app.stage);
-                    if (rotatingRef.current) {
-                        // 🌀 实时旋转
-                        const cx = centerX + transforms[i].transform.position.x * scaleX;
-                        const cy = centerY + transforms[i].transform.position.y * scaleY;
-                        const angleNow = Math.atan2(local.y - cy, local.x - cx);
-                        const delta = angleNow - rotationStartAngleRef.current;
+                    // 绑定全局事件到 stage，确保鼠标移出 sprite 后仍能拖拽
+                    const handleGlobalMove = (e: any) => {
+                        const i = draggingRef.current;
+                        if (i === null) return;
 
-                        setTransforms((prev) => {
-                            const copy = [...prev];
-                            copy[i].transform.rotation = initialRotationRef.current + delta;
-                            return copy;
-                        });
-                    }   else {
-                        const deltaX = local.x - offsetRef.current.x; // 正确计算增量
-                        const deltaY = local.y - offsetRef.current.y;
+                        const localPos = e.data.getLocalPosition(app.stage);
+                        if (rotatingRef.current) {
+                            // 🌀 实时旋转
+                            const cx = centerX + transforms[i].transform.position.x * scaleX;
+                            const cy = centerY + transforms[i].transform.position.y * scaleY;
+                            const angleNow = Math.atan2(localPos.y - cy, localPos.x - cx);
+                            const delta = angleNow - rotationStartAngleRef.current;
 
-                        setTransforms((prev) => {
-                            const copy = [...prev];
-                            selectedIndexes.forEach((idx) => {
-                                const initialPos = initialPositionsRef.current[idx];
-                                if (initialPos) {
-                                    // 应用Lock X和Lock Y逻辑
-                                    if (!lockX) {
-                                        copy[idx].transform.position.x = initialPos.x + deltaX / scaleX;
-                                    }
-                                    if (!lockY) {
-                                        copy[idx].transform.position.y = initialPos.y + deltaY / scaleY;
-                                    }
-                                }
+                            setTransforms((prev) => {
+                                const copy = [...prev];
+                                copy[i].transform.rotation = initialRotationRef.current + delta;
+                                return copy;
                             });
-                            return copy;
-                        });
-                    }
+                        } else {
+                            const deltaX = localPos.x - offsetRef.current.x;
+                            const deltaY = localPos.y - offsetRef.current.y;
+
+                            setTransforms((prev) => {
+                                const copy = [...prev];
+                                selectedIndexes.forEach((idx) => {
+                                    const initialPos = initialPositionsRef.current[idx];
+                                    if (initialPos) {
+                                        // 应用Lock X和Lock Y逻辑
+                                        if (!lockX) {
+                                            copy[idx].transform.position.x = initialPos.x + deltaX / scaleX;
+                                        }
+                                        if (!lockY) {
+                                            copy[idx].transform.position.y = initialPos.y + deltaY / scaleY;
+                                        }
+                                    }
+                                });
+                                return copy;
+                            });
+                        }
+                    };
+
+                    const handleGlobalUp = () => {
+                        draggingRef.current = null;
+                        rotatingRef.current = false;
+                        stage.off("pointermove", handleGlobalMove);
+                        stage.off("pointerup", handleGlobalUp);
+                        stage.off("pointerupoutside", handleGlobalUp);
+                    };
+
+                    // 绑定全局事件
+                    stage.on("pointermove", handleGlobalMove);
+                    stage.on("pointerup", handleGlobalUp);
+                    stage.on("pointerupoutside", handleGlobalUp);
                 });
 
             // 📏 蓝色边框

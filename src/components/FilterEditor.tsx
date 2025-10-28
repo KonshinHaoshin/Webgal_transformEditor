@@ -157,6 +157,7 @@ export default function FilterEditor({
   // 应用某个键的变更：实时写回 transforms
   const applyKey = (key: FilterKey, num: number) => {
     setValues(prev => ({ ...prev, [key]: num }));
+    
     setTransforms(prev =>
       prev.map((t, i) => {
         let shouldApply = false;
@@ -179,8 +180,13 @@ export default function FilterEditor({
         
         if (!shouldApply) return t;
 
-        // 写回到 transform
-        const nextTransform = { ...t.transform, [key]: num };
+        // 写回到 transform - 确保保留所有已有属性，并更新当前键的值
+        const nextTransform = {
+          ...t.transform,
+          [key]: num
+          // 所有其他滤镜参数（brightness, contrast, saturation, gamma, colorRed, colorGreen, colorBlue 等）
+          // 都通过 ...t.transform 被保留，每次修改单个参数时不会丢失其他参数
+        };
         return { ...t, transform: nextTransform };
       })
     );
@@ -189,6 +195,7 @@ export default function FilterEditor({
   // 一键重置为默认（实时写回）
   const resetAll = () => {
     setValues(DEFAULTS);
+    
     setTransforms(prev =>
       prev.map((t, i) => {
         let shouldApply = false;
@@ -208,6 +215,7 @@ export default function FilterEditor({
         
         if (!shouldApply) return t;
 
+        // 确保所有滤镜参数都被写入 transform 对象
         const out = { ...t.transform };
         (Object.keys(DEFAULTS) as FilterKey[]).forEach(k => {
           out[k] = DEFAULTS[k];
@@ -302,6 +310,7 @@ export default function FilterEditor({
         
         if (!shouldApply) return t;
 
+        // 确保所有预设参数都被写入 transform 对象
         const nextTransform = { ...t.transform, ...preset };
         return { ...t, transform: nextTransform };
       })
@@ -444,6 +453,8 @@ export default function FilterEditor({
               borderRadius: "4px",
               fontSize: "12px"
             }}
+            aria-label="选择预设"
+            title="选择预设"
           >
             <option value="">选择一个预设...</option>
             {Object.keys(getAllPresets).map(key => (
@@ -519,7 +530,7 @@ export default function FilterEditor({
         )}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
         <h3 style={{ margin: 0 }}>Filter Editor</h3>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <input
@@ -541,34 +552,39 @@ export default function FilterEditor({
           maxWidth: 860,
         }}
       >
-        {FILTER_DEFS.map(def => (
-          <div key={def.key} style={{ padding: 8, border: "1px solid #eee", borderRadius: 6 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <label>{def.label}</label>
+        {FILTER_DEFS.map(def => {
+          return (
+            <div key={def.key} style={{ padding: 8, border: "1px solid #eee", borderRadius: 6 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <label htmlFor={`input-${def.key}`}>{def.label}</label>
+                <input
+                  id={`input-${def.key}`}
+                  type="number"
+                  value={values[def.key]}
+                  onChange={(e) => {
+                    const v = clamp(parseFloat(e.target.value), def.min, def.max);
+                    applyKey(def.key, Number.isFinite(v) ? v : def.def);
+                  }}
+                  step={def.step}
+                  min={def.min}
+                  max={def.max}
+                  style={{ width: 90 }}
+                  aria-label={def.label}
+                />
+              </div>
               <input
-                type="number"
-                value={values[def.key]}
-                onChange={(e) => {
-                  const v = clamp(parseFloat(e.target.value), def.min, def.max);
-                  applyKey(def.key, Number.isFinite(v) ? v : def.def);
-                }}
-                step={def.step}
+                type="range"
                 min={def.min}
                 max={def.max}
-                style={{ width: 90 }}
+                step={def.step}
+                value={values[def.key]}
+                onChange={(e) => applyKey(def.key, parseFloat(e.target.value))}
+                style={{ width: "100%" }}
+                aria-label={def.label}
               />
             </div>
-            <input
-              type="range"
-              min={def.min}
-              max={def.max}
-              step={def.step}
-              value={values[def.key]}
-              onChange={(e) => applyKey(def.key, parseFloat(e.target.value))}
-              style={{ width: "100%" }}
-            />
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <p style={{ fontSize: 12, color: "#666", marginTop: 10 }}>
