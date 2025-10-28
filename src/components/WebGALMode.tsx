@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 interface WebGALModeProps {
-    onFolderSelect: (folderPath: string) => void;
+    onFolderSelect: (folderPath: string | null) => void;
     onFileSelect: (type: 'figure' | 'background', filename: string) => void;
     selectedFolder: string | null;
     availableFigures: string[];
@@ -17,21 +17,33 @@ export default function WebGALMode({
 }: WebGALModeProps) {
     const [isExpanded, setIsExpanded] = useState(false);
 
-    const handleFolderSelect = async () => {
-        try {
-            const dialog = await import('@tauri-apps/plugin-dialog');
-            const result = await dialog.open({
-                directory: true,
-                title: "选择WebGAL游戏文件夹",
-                defaultPath: ""
-            });
-            
-            if (result && typeof result === 'string') {
-                onFolderSelect(result);
+    const handleCheckboxChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const isChecked = e.target.checked;
+        
+        if (isChecked) {
+            // 勾选：打开文件夹选择对话框
+            try {
+                const dialog = await import('@tauri-apps/plugin-dialog');
+                const result = await dialog.open({
+                    directory: true,
+                    title: "选择WebGAL游戏文件夹",
+                    defaultPath: ""
+                });
+                
+                if (result && typeof result === 'string') {
+                    onFolderSelect(result);
+                } else {
+                    // 用户取消了选择，将勾选框重置为未选中状态
+                    e.target.checked = false;
+                }
+            } catch (error) {
+                console.error('选择文件夹失败:', error);
+                alert('选择文件夹失败: ' + error);
+                e.target.checked = false;
             }
-        } catch (error) {
-            console.error('选择文件夹失败:', error);
-            alert('选择文件夹失败: ' + error);
+        } else {
+            // 取消勾选：清除选择
+            onFolderSelect(null);
         }
     };
 
@@ -48,7 +60,7 @@ export default function WebGALMode({
                     <input 
                         type="checkbox" 
                         checked={!!selectedFolder}
-                        onChange={handleFolderSelect}
+                        onChange={handleCheckboxChange}
                     />
                     WebGAL模式
                 </label>

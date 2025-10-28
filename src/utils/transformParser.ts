@@ -34,6 +34,11 @@ export function exportScript(
     const scaleRatioY = baseHeight / canvasHeight;
 
     return transforms.map(obj => {
+        // 如果是原始文本类型，直接返回原始文本
+        if (obj.type === "rawText" && obj.rawText) {
+            return obj.rawText;
+        }
+
         const transform = {
             ...obj.transform,
             position: {
@@ -89,8 +94,230 @@ export function exportScript(
     }).join("\n");
 }
 
+/**
+ * 构建动画序列
+ * 从原始的 transforms 中，为每个 figureID 构建从 changeFigure 到 setTransform 的动画序列
+ */
+export function buildAnimationSequence(transforms: TransformData[]): Array<{
+    target: string;
+    duration: number;
+    ease: string;
+    startState: any;
+    endState: any;
+    startTime: number;
+    endTime: number;
+}> {
+    const animationSequence: Array<{
+        target: string;
+        duration: number;
+        ease: string;
+        startState: any;
+        endState: any;
+        startTime: number;
+        endTime: number;
+    }> = [];
+    
+    // Map<figureID, { changeFigure, setTransforms[] }>
+    const figureAnimations = new Map<string, {
+        changeFigure?: TransformData;
+        setTransforms: TransformData[];
+    }>();
+    
+    // 收集每个 figureID 的所有相关命令
+    for (const transform of transforms) {
+        if (transform.type === 'rawText' || transform.type === 'changeBg') {
+            continue;
+        }
+        
+        const figureID = transform.target;
+        if (!figureID || figureID === 'bg-main') {
+            continue;
+        }
+        
+        if (!figureAnimations.has(figureID)) {
+            figureAnimations.set(figureID, { setTransforms: [] });
+        }
+        
+        const anim = figureAnimations.get(figureID)!;
+        
+        if (transform.type === 'changeFigure') {
+            anim.changeFigure = transform;
+        } else if (transform.type === 'setTransform') {
+            anim.setTransforms.push(transform);
+        }
+    }
+    
+    // 为每个 figureID 构建动画
+    let currentTime = 0;
+    figureAnimations.forEach((anim, figureID) => {
+        if (!anim.changeFigure) {
+            // 没有 changeFigure，跳过
+            return;
+        }
+        
+        // 起始状态：changeFigure 的 transform
+        let currentState = { ...anim.changeFigure.transform };
+        
+        // 处理每个 setTransform
+        for (const setTransform of anim.setTransforms) {
+            // 计算结束状态：合并当前状态和 setTransform
+            const endState = mergeTransform(currentState, setTransform.transform);
+            
+            const duration = setTransform.duration || 500;
+            const ease = setTransform.ease || 'easeInOut';
+            
+            animationSequence.push({
+                target: figureID,
+                duration,
+                ease,
+                startState: { ...currentState },
+                endState,
+                startTime: currentTime,
+                endTime: currentTime + duration
+            });
+            
+            // 更新当前状态为结束状态
+            currentState = endState;
+            currentTime += duration;
+        }
+    });
+    
+    return animationSequence;
+}
+
+/**
+ * 深度合并 transform 对象
+ * 对于嵌套对象（如 position, scale），合并属性；对于其他属性，替换
+ */
+function mergeTransform(base: any, update: any): any {
+    const result = { ...base };
+    
+    for (const key in update) {
+        if (update[key] !== undefined && update[key] !== null) {
+            // 对于 position 和 scale 这样的对象，需要合并属性
+            if (key === 'position' || key === 'scale') {
+                result[key] = {
+                    ...(result[key] || {}),
+                    ...update[key]
+                };
+            } else {
+                // 其他属性直接替换
+                result[key] = update[key];
+            }
+        }
+    }
+    
+    return result;
+}
+
+/**
+ * 应用 figureID 系统
+ * 相同 figureID 的多个命令会被合并，只显示最终状态
+ * 保持 rawText 和 changeBg 的原始顺序
+ */
+export function applyFigureIDSystem(transforms: TransformData[]): TransformData[] {
+    // Map<figureID, TransformData> - 存储每个 figure 的最终状态
+    const figureStates = new Map<string, TransformData>();
+    const result: TransformData[] = [];
+    
+    // 第一次遍历：处理所有 figure 相关的命令，计算最终状态
+    for (const transform of transforms) {
+        // rawText 和 changeBg 跳过，后面再处理
+        if (transform.type === 'rawText' || transform.type === 'changeBg') {
+            continue;
+        }
+        
+        const figureID = transform.target;
+        if (!figureID || figureID === 'bg-main') {
+            // 忽略无效的 target 或背景
+            continue;
+        }
+        
+        if (transform.type === 'changeFigure') {
+            // changeFigure：设置/更新该 figure 的状态（完全替换）
+            figureStates.set(figureID, { ...transform });
+        } else if (transform.type === 'setTransform') {
+            // setTransform：合并该 figure 的 transform
+            const existingState = figureStates.get(figureID);
+            if (existingState) {
+                // 合并 transform（深度合并 position 和 scale，其他属性替换）
+                const mergedTransform = mergeTransform(
+                    existingState.transform,
+                    transform.transform
+                );
+                figureStates.set(figureID, {
+                    ...existingState,
+                    transform: mergedTransform
+                });
+            } else {
+                // 如果 figure 不存在，创建一个基于 setTransform 的状态
+                // 但缺少 path，所以可能需要警告
+                console.warn(`⚠️ setTransform 针对不存在的 figureID: ${figureID}，将创建不完整的状态`);
+                // 创建一个临时的 changeFigure 状态
+                figureStates.set(figureID, {
+                    ...transform,
+                    type: 'changeFigure' as const,
+                    path: '', // 缺少路径
+                    presetPosition: 'center'
+                });
+            }
+        }
+    }
+    
+    // 第二次遍历：保持原始顺序，插入最终的 figure 状态
+    // 记录哪些 figureID 已经被添加到结果中
+    const addedFigures = new Set<string>();
+    
+    for (const transform of transforms) {
+        if (transform.type === 'rawText' || transform.type === 'changeBg') {
+            // rawText 和 changeBg 保持原位置
+            result.push(transform);
+        } else {
+            const figureID = transform.target;
+            if (figureID && figureID !== 'bg-main') {
+                // 只有在第一次遇到该 figureID 时才添加最终状态
+                if (!addedFigures.has(figureID)) {
+                    const finalState = figureStates.get(figureID);
+                    if (finalState) {
+                        result.push(finalState);
+                        addedFigures.add(figureID);
+                    }
+                }
+                // 后续相同 figureID 的命令被忽略（已合并）
+            }
+        }
+    }
+    
+    // 添加那些在原始序列中从未出现过的 figure（不应该发生，但保险起见）
+    figureStates.forEach((state, figureID) => {
+        if (!addedFigures.has(figureID)) {
+            result.push(state);
+        }
+    });
+    
+    return result;
+}
+
 export function parseScript(script: string, scaleX: number, scaleY: number): TransformData[] {
-    const lines = script.split(";").map(line => line.trim()).filter(Boolean);
+    // 先按换行符分割，以保留原始行的结构
+    const rawLines = script.split(/\r?\n/);
+    const lines: string[] = [];
+    
+    for (const rawLine of rawLines) {
+        const trimmed = rawLine.trim();
+        if (!trimmed) continue;
+        
+        // 如果行末尾有分号，移除分号后尝试解析
+        // 如果行中没有分号或移除分号后仍无法解析，将整行作为原始文本处理
+        if (trimmed.endsWith(';')) {
+            // 移除末尾分号，尝试解析
+            const withoutSemicolon = trimmed.slice(0, -1).trim();
+            lines.push(withoutSemicolon);
+        } else {
+            // 没有分号的行（可能是对话文本等），直接添加
+            lines.push(trimmed);
+        }
+    }
 
     return lines.map((line) => {
         const [command, ...rest] = line.split(" -");
@@ -214,13 +441,13 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
             };
         }
 
-
-            alert("⚠️ 不支持的指令格式：" + line);
+        // 无法解析的行，保存为原始文本
         return {
-            type: "setTransform",
-            target: "invalid",
+            type: "rawText",
+            target: "",
             duration: 0,
-            transform: { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } }
+            transform: { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } },
+            rawText: line // 保存原始行文本
         };
     });
 }

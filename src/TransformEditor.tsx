@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import "./transform-editor.css";
 import { TransformData } from "./types/transform.ts";
-import { exportScript, parseScript } from "./utils/transformParser.ts";
+import { exportScript, parseScript, applyFigureIDSystem, buildAnimationSequence } from "./utils/transformParser.ts";
 import CanvasRenderer from "./components/CanvasRenderer.tsx";
 import RotationPanel from "./components/RotationPanel";
 import Modal from "./components/Modal";
@@ -16,6 +16,7 @@ export default function TransformEditor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [input, setInput] = useState("");
   const [transforms, setTransforms] = useState<TransformData[]>([]);
+  const [originalTransforms, setOriginalTransforms] = useState<TransformData[]>([]); // 保存原始未合并的 transforms 用于动画
   const [dragging] = useState<number | null>(null);
   const [modelImg, setModelImg] = useState<HTMLImageElement | null>(null);
   const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
@@ -67,7 +68,16 @@ export default function TransformEditor() {
   }
 
   // WebGAL 模式处理函数
-  const handleGameFolderSelect = async (folderPath: string) => {
+  const handleGameFolderSelect = async (folderPath: string | null) => {
+    if (folderPath === null) {
+      // 取消选择
+      setSelectedGameFolder(null);
+      setAvailableFigures([]);
+      setAvailableBackgrounds([]);
+      // 可以在这里清理 webgalFileManager 的状态，如果有相关方法的话
+      return;
+    }
+    
     setSelectedGameFolder(folderPath);
     await webgalFileManager.setGameFolder(folderPath);
     
@@ -146,53 +156,28 @@ export default function TransformEditor() {
 
   // 真正的动画播放功能
   const playAnimation = () => {
-    if (transforms.length === 0) {
+    // 使用原始 transforms（未合并的）来构建动画序列
+    const rawTransforms = originalTransforms.length > 0 ? originalTransforms : transforms;
+    
+    if (rawTransforms.length === 0) {
       alert("请先添加一些变换后再播放动画");
       return;
     }
 
-    // 过滤出所有的 setTransform 项目
-    const setTransformItems = transforms.filter(t => t.type === 'setTransform');
+    // 使用新的动画序列构建函数
+    const animationSequence = buildAnimationSequence(rawTransforms);
     
-    if (setTransformItems.length === 0) {
-      alert("⚠️ 没有找到任何 setTransform 指令，无法播放动画");
+    if (animationSequence.length === 0) {
+      alert("⚠️ 没有找到任何可播放的动画序列（需要 changeFigure 和 setTransform 组合）");
       return;
     }
 
-    // 默认起始状态
-    const defaultState = {
-      position: { x: 0, y: 0 },
-      rotation: 0,
-      scale: { x: 1, y: 1 }
-    };
-
-    // 修复 playAnimation 函数中的 ease 处理逻辑
-    const newAnimationData = setTransformItems.map((transform) => {
-      const target = transform.target;
-      const duration = exportDuration;
-      // 如果 transform 有自己的 ease，使用它；否则使用全局 ease
-      let ease = transform.ease;
-      if (!ease || ease === "" || ease === "default") {
-        ease = ""; // 空字符串表示使用全局设置
-      }
-      
-      return {
-        target,
-        duration,
-        ease,
-        startState: defaultState,
-        endState: transform.transform,
-        startTime: 0,
-        endTime: duration
-      };
-    });
-
     // 设置动画数据并开始播放
-    setAnimationData(newAnimationData);
+    setAnimationData(animationSequence);
     setIsPlaying(true);
     setAnimationStartTime(Date.now());
     
-    console.log("🎬 开始播放动画:", newAnimationData);
+    console.log("🎬 开始播放动画:", animationSequence);
   };
 
   // 停止动画
@@ -236,20 +221,46 @@ export default function TransformEditor() {
     }
 
     const currentTime = Date.now() - animationStartTime;
-    const maxDuration = Math.max(...animationData.map(a => a.duration));
+    const maxEndTime = Math.max(...animationData.map(a => a.endTime));
     
-    if (currentTime >= maxDuration) {
+    if (currentTime >= maxEndTime) {
       // 动画结束
       setIsPlaying(false);
       setAnimationStartTime(null);
       return null;
     }
 
-         // 计算每个目标的当前状态
-     return animationData.map(animation => {
-       const { target, startState, endState, duration, ease } = animation;
-       const elapsed = Math.min(currentTime, duration);
-       const progress = elapsed / duration;
+    // 按 target 分组，每组取最新的有效动画状态
+    const targetStates = new Map<string, any>();
+    
+    // 先找到每个 target 的第一个 changeFigure 作为初始状态
+    const initialStates = new Map<string, any>();
+    for (const animation of animationData) {
+      const { target, startState } = animation;
+      if (!initialStates.has(target)) {
+        initialStates.set(target, { ...startState });
+      }
+    }
+    
+    // 计算每个动画的当前状态
+    for (const animation of animationData) {
+      const { target, startState, endState, startTime, endTime, ease } = animation;
+      
+      // 如果动画还没开始，显示初始状态
+      if (currentTime < startTime) {
+        const initialState = initialStates.get(target);
+        if (initialState) {
+          targetStates.set(target, {
+            target,
+            transform: { ...initialState }
+          });
+        }
+      }
+      // 如果当前时间在这个动画的时间范围内
+      else if (currentTime >= startTime && currentTime <= endTime) {
+        const duration = endTime - startTime;
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
        
                // 应用缓动函数 - 确保 ease 值有效
         let easedProgress = progress;
@@ -263,82 +274,65 @@ export default function TransformEditor() {
           }
         }
       
-      // 插值计算当前位置
-      const currentPosition = {
-        x: startState.position.x + (endState.position.x - startState.position.x) * easedProgress,
-        y: startState.position.y + (endState.position.y - startState.position.y) * easedProgress
-      };
-      
-      // 插值计算当前缩放
-      const currentScale = {
-        x: startState.scale.x + (endState.scale.x - startState.scale.x) * easedProgress,
-        y: startState.scale.y + (endState.scale.y - startState.scale.y) * easedProgress
-      };
-      
-      // 插值计算当前旋转
-      const currentRotation = startState.rotation + (endState.rotation - startState.rotation) * easedProgress;
-      
-      // 插值计算滤镜效果
-      const currentFilters: any = {};
-      if (endState.brightness !== undefined) {
-        currentFilters.brightness = endState.brightness; 
-      }
-      if (endState.contrast !== undefined) {
-        currentFilters.contrast = endState.contrast; 
-      }
-      if (endState.saturation !== undefined) {
-        currentFilters.saturation = endState.saturation; 
-      }
-      if (endState.gamma !== undefined) {
-        currentFilters.gamma = endState.gamma; 
-      }
-      if (endState.colorRed !== undefined) {
-        currentFilters.colorRed = endState.colorRed; 
-      }
-      if (endState.colorGreen !== undefined) {
-        currentFilters.colorGreen = endState.colorGreen; 
-      }
-      if (endState.colorBlue !== undefined) {
-        currentFilters.colorBlue = endState.colorBlue; 
-      }
-      if (endState.bloom !== undefined) {
-        currentFilters.bloom = endState.bloom; 
-      }
-      if (endState.bloomBrightness !== undefined) {
-        currentFilters.bloomBrightness = endState.bloomBrightness; 
-      }
-      if (endState.bloomBlur !== undefined) {
-        currentFilters.bloomBlur = endState.bloomBlur; 
-      }
-      if (endState.bevel !== undefined) {
-        currentFilters.bevel = endState.bevel; 
-      }
-      if (endState.bevelThickness !== undefined) {
-        currentFilters.bevelThickness = endState.bevelThickness; 
-      }
-      if (endState.bevelRotation !== undefined) {
-        currentFilters.bevelRotation = endState.bevelRotation; 
-      }
-      if (endState.bevelRed !== undefined) {
-        currentFilters.bevelRed = endState.bevelRed; 
-      }
-      if (endState.bevelGreen !== undefined) {
-        currentFilters.bevelGreen = endState.bevelGreen; 
-      }
-      if (endState.bevelBlue !== undefined) {
-        currentFilters.bevelBlue = endState.bevelBlue; 
-      }
-
-      return {
-        target,
-        transform: {
+        // 插值计算当前位置
+        const currentPosition = {
+          x: startState.position.x + (endState.position.x - startState.position.x) * easedProgress,
+          y: startState.position.y + (endState.position.y - startState.position.y) * easedProgress
+        };
+        
+        // 插值计算当前缩放
+        const currentScale = {
+          x: startState.scale.x + (endState.scale.x - startState.scale.x) * easedProgress,
+          y: startState.scale.y + (endState.scale.y - startState.scale.y) * easedProgress
+        };
+        
+        // 插值计算当前旋转
+        const currentRotation = (startState.rotation || 0) + ((endState.rotation || 0) - (startState.rotation || 0)) * easedProgress;
+        
+        // 合并所有滤镜效果
+        const currentTransform: any = {
           position: currentPosition,
           scale: currentScale,
-          rotation: currentRotation,
-          ...currentFilters
+          rotation: currentRotation
+        };
+        
+        // 复制所有其他属性（滤镜等）
+        for (const key in endState) {
+          if (key !== 'position' && key !== 'scale' && key !== 'rotation' && endState[key] !== undefined) {
+            const startValue = startState[key] !== undefined ? startState[key] : 0;
+            currentTransform[key] = startValue + (endState[key] - startValue) * easedProgress;
+          }
         }
-      };
-    });
+        
+        // 存储或更新该 target 的状态（如果有多个动画，取最新的）
+        targetStates.set(target, {
+          target,
+          transform: currentTransform
+        });
+      } else if (currentTime > endTime) {
+        // 动画已结束，保持结束状态
+        const currentTransform: any = {
+          position: { ...endState.position },
+          scale: { ...endState.scale },
+          rotation: endState.rotation || 0
+        };
+        
+        // 复制所有其他属性
+        for (const key in endState) {
+          if (key !== 'position' && key !== 'scale' && key !== 'rotation') {
+            currentTransform[key] = endState[key];
+          }
+        }
+        
+        targetStates.set(target, {
+          target,
+          transform: currentTransform
+        });
+      }
+    }
+    
+    // 返回所有 target 的状态数组
+    return Array.from(targetStates.values());
   };
 
   useEffect(() => {
@@ -381,11 +375,11 @@ export default function TransformEditor() {
 
     const animationLoop = () => {
       const currentState = getCurrentAnimationState();
-      if (currentState) {
+      if (currentState && Array.isArray(currentState)) {
         // 更新 transforms 以显示当前动画状态
         setTransforms(prev => {
           const newTransforms = [...prev];
-          currentState.forEach(animState => {
+          currentState.forEach((animState: any) => {
             const index = newTransforms.findIndex(t => t.target === animState.target);
             if (index !== -1) {
               newTransforms[index] = {
@@ -458,30 +452,36 @@ export default function TransformEditor() {
       />
       <br />
              <button
-         onClick={async () => {
-           const parsed = parseScript(input, scaleX, scaleY).map((t) => {
-             const { __presetApplied, ...rest } = t as any;
-             return rest;
-           });
-           if (parsed.length === 0) alert("⚠️ 没有解析到任何 setTransform 指令！");
-           
-                       // 检测导入的脚本中的 ease 值，并更新全局设置
-            const setTransformItems = parsed.filter(t => t.type === 'setTransform');
-            if (setTransformItems.length > 0) {
-              // 如果存在 setTransform，使用第一个的 ease 值作为全局默认值
-              const firstEase = setTransformItems[0].ease;
-              if (firstEase && firstEase !== "") {
-                setEase(firstEase);
-                console.log(`🎯 检测到导入脚本的 ease 值: ${firstEase}，已更新全局设置`);
-              }
-            }
-           
-           // 如果启用了 WebGAL 模式，自动加载图片
-           if (selectedGameFolder) {
-             await parseAndLoadImages(input);
+        onClick={async () => {
+          const parsed = parseScript(input, scaleX, scaleY).map((t) => {
+            const { __presetApplied, ...rest } = t as any;
+            return rest;
+          });
+          
+          // 应用 figureID 系统：合并相同 figureID 的状态
+          const merged = applyFigureIDSystem(parsed);
+          
+          if (merged.length === 0) alert("⚠️ 没有解析到任何指令！");
+          
+                      // 检测导入的脚本中的 ease 值，并更新全局设置
+           const setTransformItems = merged.filter(t => t.type === 'setTransform');
+           if (setTransformItems.length > 0) {
+             // 如果存在 setTransform，使用第一个的 ease 值作为全局默认值
+             const firstEase = setTransformItems[0].ease;
+             if (firstEase && firstEase !== "") {
+               setEase(firstEase);
+               console.log(`🎯 检测到导入脚本的 ease 值: ${firstEase}，已更新全局设置`);
+             }
            }
-           
-           setTransforms(parsed);
+          
+          // 如果启用了 WebGAL 模式，自动加载图片
+          if (selectedGameFolder) {
+            await parseAndLoadImages(input);
+          }
+          
+          // 保存原始 transforms（用于动画）和合并后的 transforms（用于渲染）
+          setOriginalTransforms(parsed);
+          setTransforms(merged);
            setAllSelected(false);
            setSelectedIndexes([]);
          }}

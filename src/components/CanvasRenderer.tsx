@@ -197,6 +197,11 @@ export default function CanvasRenderer(props: Props) {
         spriteMap.current = {};
 
         transforms.forEach((t, index) => {
+            // 跳过 rawText 类型，不渲染任何内容
+            if (t.type === "rawText") {
+                return;
+            }
+            
             const container = new PixiContainer();
             const isBg = t.target === "bg-main";
             
