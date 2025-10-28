@@ -279,25 +279,14 @@ export default function CanvasRenderer(props: Props) {
                 // 普通图片或 GIF
                 sprite = displayObject as PIXI.Sprite;
                 sprite.interactive = true;
-                const maskGraphics = new PIXI.Graphics();
-                maskGraphics.beginFill(0xffffff);
-                maskGraphics.drawRect(-sprite.width / 2, -sprite.height / 2, sprite.width, sprite.height);
-                maskGraphics.endFill();
-
-                // 设置 hitArea
-                sprite.hitArea = new PIXI.Rectangle(
-                    -sprite.width / 2,
-                    -sprite.height / 2,
-                    sprite.width,
-                    sprite.height
-                );
                 sprite.cursor = "pointer";
+                // 注意：hitArea 和 mask 将在计算完 drawW/drawH 后再设置，以确保使用正确的尺寸
             }
 
             // —— 等比缩放 + 预设位（对 bg 与 非 bg 分开）——
             let drawW = 0, drawH = 0;
-            let baseX = centerX; // addFigure 的“基线 X”
-            let baseY = centerY; // addFigure 的“基线 Y”
+            let baseX = centerX; // addFigure 的"基线 X"
+            let baseY = centerY; // addFigure 的"基线 Y"
 
             if (isBg && bgImg) {
                 // 背景：铺满画布（cover），保持你原有逻辑
@@ -306,25 +295,24 @@ export default function CanvasRenderer(props: Props) {
                 let fitScale = canvasWidth / bgImg.width;
                 if (canvasRatio < imageRatio) fitScale = canvasHeight / bgImg.height;
 
-                const userScale = t.transform.scale?.x ?? 1;
-                drawW = bgImg.width * fitScale * userScale;
-                drawH = bgImg.height * fitScale * userScale;
+                // drawW/drawH 只使用 fitScale，用户缩放通过 container.scale 应用
+                drawW = bgImg.width * fitScale;
+                drawH = bgImg.height * fitScale;
 
                 // BG 永远居中
                 baseX = canvasWidth / 2;
                 baseY = canvasHeight / 2;
             } else {
-                // 立绘：按 addFigure 等比适配（contain），再叠加用户缩放
+                // 立绘：按 addFigure 等比适配（contain）
                 // 使用实际渲染的图片尺寸
                 const imgW = imgWidth || 1;
                 const imgH = imgHeight || 1;
 
-                const fitScale = Math.min(canvasWidth / imgW, canvasHeight / imgH); // targetScale
-                const userScale = t.transform.scale?.x ?? 1;
-                const targetScale = fitScale * userScale;
-
-                drawW = imgW * targetScale;
-                drawH = imgH * targetScale;
+                const fitScale = Math.min(canvasWidth / imgW, canvasHeight / imgH);
+                
+                // drawW/drawH 只使用 fitScale，用户缩放通过 container.scale 应用
+                drawW = imgW * fitScale;
+                drawH = imgH * fitScale;
 
                 // 垂直基线（与 addFigure 一致）
                 // 先以画布中线为基准，如果适配后的高度没有铺满，则把基线下移 (stageH - targetH)/2
@@ -342,13 +330,30 @@ export default function CanvasRenderer(props: Props) {
                 if (preset === 'right')  baseX = canvasWidth - targetWNoUser / 2;
             }
 
-// 应用尺寸
+            // 应用尺寸
             sprite.width = drawW;
             sprite.height = drawH;
             
-            // 对于普通图片和 GIF，设置 anchor
+            // 对于普通图片和 GIF，设置 anchor 和 hitArea（使用实际的渲染尺寸）
             if (figure?.sourceType !== 'live2d' && figure?.sourceType !== 'jsonl') {
                 sprite.anchor?.set(0.5);
+                
+                // 在设置完尺寸后，设置 hitArea（使用实际的渲染尺寸 drawW 和 drawH）
+                sprite.hitArea = new PIXI.Rectangle(
+                    -drawW / 2,
+                    -drawH / 2,
+                    drawW,
+                    drawH
+                );
+                
+                // 如果需要 mask，也使用正确的尺寸
+                if (sprite.mask) {
+                    const maskGraphics = sprite.mask as PIXI.Graphics;
+                    maskGraphics.clear();
+                    maskGraphics.beginFill(0xffffff);
+                    maskGraphics.drawRect(-drawW / 2, -drawH / 2, drawW, drawH);
+                    maskGraphics.endFill();
+                }
             }
             
             container.addChild(sprite);
