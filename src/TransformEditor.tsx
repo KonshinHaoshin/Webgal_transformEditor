@@ -33,6 +33,8 @@ export default function TransformEditor() {
   const [lastAppliedPresetKeys, setLastAppliedPresetKeys] = useState<string[]>([]);
   const [applyFilterToBg, setApplyFilterToBg] = useState(false);
   const [guideLineType, setGuideLineType] = useState<GuideLineType>('none');
+  // 观察层模式："none" | "color" | "luminosity"
+  const [overlayMode, setOverlayMode] = useState<"none" | "color" | "luminosity">("none");
   
   // 动画播放相关状态
   const [isPlaying, setIsPlaying] = useState(false);
@@ -663,6 +665,7 @@ export default function TransformEditor() {
                });
              }}
              style={{ marginLeft: 5 }}
+             aria-label="选择缓动函数"
            >
              <option value="default">默认</option>
              <option value="easeInOut">缓入缓出</option>
@@ -683,11 +686,26 @@ export default function TransformEditor() {
          </label>
          
          <label style={{ marginLeft: 20 }}>
+           观察层:
+           <select
+             value={overlayMode}
+             onChange={(e) => setOverlayMode(e.target.value as "none" | "color" | "luminosity")}
+             style={{ marginLeft: 5 }}
+             aria-label="选择观察层模式"
+           >
+             <option value="none">无</option>
+             <option value="color">颜色</option>
+             <option value="luminosity">明度</option>
+           </select>
+         </label>
+         
+         <label style={{ marginLeft: 20 }}>
            辅助线:
            <select
              value={guideLineType}
              onChange={(e) => setGuideLineType(e.target.value as GuideLineType)}
              style={{ marginLeft: 5 }}
+             aria-label="选择辅助线类型"
            >
              <option value="none">无辅助线</option>
              <option value="grid-3x3">九宫格</option>
@@ -787,6 +805,7 @@ export default function TransformEditor() {
 
         <label style={{ marginTop: 10, display: "block" }}>选择预设：</label>
         <select
+          aria-label="选择滤镜预设"
           onChange={(e) => {
             const preset = filterPresets[e.target.value];
             if (!preset) return;
@@ -873,6 +892,7 @@ export default function TransformEditor() {
           lockX={lockX}
           lockY={lockY}
           guideLineType={guideLineType}
+          overlayMode={overlayMode}
         />
       </div>
 

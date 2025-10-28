@@ -4,6 +4,7 @@ import { TransformData } from "../types/transform";
 import { PixiContainer } from "../containers/pixiContainer.ts";
 import { GuideLineType } from "../types/guideLines";
 import { figureManager } from "../utils/figureManager";
+import { OverlayBlendFilter } from "../filters/OverlayBlendFilter.ts";
 
 interface Props {
     canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -23,6 +24,7 @@ interface Props {
     lockX: boolean;
     lockY: boolean;
     guideLineType?: GuideLineType;
+    overlayMode?: "none" | "color" | "luminosity"; // 观察层模式
 }
 
 export default function CanvasRenderer(props: Props) {
@@ -33,12 +35,14 @@ export default function CanvasRenderer(props: Props) {
         modelOriginalWidth, modelOriginalHeight,
         // @ts-ignore
         bgBaseScaleRef, setTransforms, setSelectedIndexes, lockX, lockY,
-        guideLineType = 'none'
+        guideLineType = 'none',
+        overlayMode = 'none'
     } = props;
 
     const appRef = useRef<PIXI.Application | null>(null);
     const spriteMap = useRef<Record<string, PixiContainer>>({});
     const graphicsMapRef = useRef<Record<string, PIXI.Graphics>>({});
+    const overlayRef = useRef<{ container: PIXI.Container; filter: OverlayBlendFilter } | null>(null);
 
     const scaleX = canvasWidth / baseWidth;
     const scaleY = canvasHeight / baseHeight;
@@ -500,6 +504,7 @@ export default function CanvasRenderer(props: Props) {
             }
 
             spriteMap.current[t.target] = container;
+            // 直接添加到stage，保持对象可交互
             if (isBg) {
                 stage.addChildAt(container, 0); // 背景始终最底层
             } else {
@@ -507,11 +512,121 @@ export default function CanvasRenderer(props: Props) {
             }
         });
         
+        // 🎨 观察层：保持原始对象在stage上，在它们之上添加观察层
+        // 这样即使有观察层，原始对象仍然可以接收鼠标事件
+        if (overlayMode !== "none") {
+            // 移除旧的观察层
+            if (overlayRef.current) {
+                const oldOverlay = stage.children.find(child => (child as any).isOverlay);
+                if (oldOverlay) {
+                    stage.removeChild(oldOverlay);
+                    oldOverlay.destroy();
+                }
+                overlayRef.current = null;
+            }
+            
+            // 将所有场景内容渲染到RenderTexture（用于Filter计算）
+            // 创建一个临时容器，保持位置为(0,0)以确保正确的坐标系统
+            const tempSceneContainer = new PIXI.Container();
+            tempSceneContainer.position.set(0, 0);
+            
+            // 收集所有需要渲染的对象（排除观察层、辅助线和文本标签）
+            const childrenToRender: PIXI.DisplayObject[] = [];
+            const childOrderMap = new Map<PIXI.DisplayObject, number>();
+            
+            stage.children.forEach((child, index) => {
+                // 只收集实际的场景对象（Container类型，且在spriteMap中）
+                if (!(child as any).isOverlay && 
+                    !(child as any).isGuideLines && 
+                    !(child instanceof PIXI.Text) &&
+                    !Object.values(graphicsMapRef.current).includes(child as any)) {
+                    childrenToRender.push(child);
+                    childOrderMap.set(child, index);
+                }
+            });
+            
+            // 保存每个对象的原始父容器引用
+            const originalParents = new Map<PIXI.DisplayObject, PIXI.Container | null>();
+            childrenToRender.forEach(child => {
+                originalParents.set(child, child.parent as PIXI.Container | null);
+            });
+            
+            // 临时将对象移动到临时容器（PIXI对象不能同时属于两个父容器）
+            childrenToRender.forEach(child => {
+                tempSceneContainer.addChild(child);
+            });
+            
+            // 渲染到RenderTexture，明确指定完整的canvas区域和正确的分辨率
+            const sceneTexture = app.renderer.generateTexture(tempSceneContainer, {
+                scaleMode: PIXI.SCALE_MODES.LINEAR,
+                resolution: window.devicePixelRatio || 1,
+                region: new PIXI.Rectangle(0, 0, canvasWidth, canvasHeight),
+            });
+            
+            // 将对象移回stage（保持原来的顺序）
+            childrenToRender.sort((a, b) => {
+                const orderA = childOrderMap.get(a) ?? 0;
+                const orderB = childOrderMap.get(b) ?? 0;
+                return orderA - orderB;
+            });
+            
+            childrenToRender.forEach(child => {
+                stage.addChild(child);
+            });
+            
+            // 清理临时容器
+            tempSceneContainer.removeChildren();
+            
+            // 创建中性灰观察层Sprite
+            const canvas = document.createElement('canvas');
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+                ctx.fillStyle = '#808080'; // RGB(128, 128, 128) - 中性灰
+                ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+            }
+            
+            const overlayTexture = PIXI.Texture.from(canvas);
+            const overlaySprite = new PIXI.Sprite(overlayTexture);
+            overlaySprite.width = canvasWidth;
+            overlaySprite.height = canvasHeight;
+            
+            // 设置观察层完全不可交互，让事件穿透到后面的内容
+            overlaySprite.interactive = false;
+            overlaySprite.buttonMode = false;
+            overlaySprite.hitArea = null; // 明确设置为null，表示不拦截任何事件
+            overlaySprite.cursor = "inherit"; // 继承光标样式，不显示手型
+            
+            // 创建和应用混合模式 Filter（传入场景纹理）
+            const blendFilter = new OverlayBlendFilter(overlayMode, sceneTexture);
+            overlaySprite.filters = [blendFilter as any];
+            
+            (overlaySprite as any).isOverlay = true;
+            overlayRef.current = { 
+                container: overlaySprite as any, 
+                filter: blendFilter,
+            };
+            // 观察层添加到最上层
+            // 由于设置了interactive=false和hitArea=null，事件会穿透到下层对象
+            stage.addChild(overlaySprite);
+        } else {
+            // 移除观察层（如果存在）
+            if (overlayRef.current) {
+                const existingOverlay = stage.children.find(child => (child as any).isOverlay);
+                if (existingOverlay) {
+                    stage.removeChild(existingOverlay);
+                    existingOverlay.destroy();
+                }
+                overlayRef.current = null;
+            }
+        }
+        
         // 重新添加辅助线（如果存在）
         if (existingGuideLines) {
             stage.addChild(existingGuideLines);
         }
-    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY]);
+    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY, overlayMode, canvasWidth, canvasHeight]);
 
     // 独立的辅助线渲染逻辑
     useEffect(() => {
