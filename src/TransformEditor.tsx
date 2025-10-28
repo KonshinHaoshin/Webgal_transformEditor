@@ -172,12 +172,46 @@ export default function TransformEditor() {
       return;
     }
 
-    // 设置动画数据并开始播放
+    // 在开始播放前，将 transforms 重置为初始状态（changeFigure 的状态）
+    // 找到每个 target 的初始 changeFigure 状态
+    const initialFigureStates = new Map<string, TransformData>();
+    for (const transform of rawTransforms) {
+      if (transform.type === 'changeFigure') {
+        const figureID = transform.target;
+        if (figureID && !initialFigureStates.has(figureID)) {
+          initialFigureStates.set(figureID, { ...transform });
+        }
+      }
+    }
+
+    // 更新 transforms 为初始状态（changeFigure 的状态，不带动画）
+    setTransforms(prev => {
+      const newTransforms = [...prev];
+      // 更新已有的 transform，保留其他属性但重置 transform
+      initialFigureStates.forEach((initialState, figureID) => {
+        const index = newTransforms.findIndex(t => t.target === figureID);
+        if (index !== -1) {
+          // 保留原有的所有属性，但将 transform 重置为初始状态
+          newTransforms[index] = {
+            ...newTransforms[index],
+            transform: JSON.parse(JSON.stringify(initialState.transform))
+          };
+        }
+      });
+      return newTransforms;
+    });
+
+    // 设置动画数据
     setAnimationData(animationSequence);
-    setIsPlaying(true);
-    setAnimationStartTime(Date.now());
     
-    console.log("🎬 开始播放动画:", animationSequence);
+    // 使用 requestAnimationFrame 确保初始状态渲染完成后再开始动画计时
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setIsPlaying(true);
+        setAnimationStartTime(Date.now());
+        console.log("🎬 开始播放动画:", animationSequence);
+      });
+    });
   };
 
   // 停止动画
@@ -233,28 +267,32 @@ export default function TransformEditor() {
     // 按 target 分组，每组取最新的有效动画状态
     const targetStates = new Map<string, any>();
     
-    // 先找到每个 target 的第一个 changeFigure 作为初始状态
+    // 先找到每个 target 的第一个动画的 startState 作为初始状态（changeFigure 的状态）
     const initialStates = new Map<string, any>();
     for (const animation of animationData) {
       const { target, startState } = animation;
       if (!initialStates.has(target)) {
-        initialStates.set(target, { ...startState });
+        // 深拷贝初始状态
+        initialStates.set(target, JSON.parse(JSON.stringify(startState)));
       }
     }
     
-    // 计算每个动画的当前状态
+    // 首先，将所有 figure 设置为初始状态（changeFigure 的状态，不带动画）
+    initialStates.forEach((initialState, target) => {
+      targetStates.set(target, {
+        target,
+        transform: JSON.parse(JSON.stringify(initialState))
+      });
+    });
+    
+    // 然后，计算每个动画的当前状态（覆盖初始状态）
     for (const animation of animationData) {
       const { target, startState, endState, startTime, endTime, ease } = animation;
       
-      // 如果动画还没开始，显示初始状态
+      // 如果动画还没开始，保持初始状态（已经在上面设置了）
       if (currentTime < startTime) {
-        const initialState = initialStates.get(target);
-        if (initialState) {
-          targetStates.set(target, {
-            target,
-            transform: { ...initialState }
-          });
-        }
+        // 不需要做任何事，初始状态已经在上面设置了
+        continue;
       }
       // 如果当前时间在这个动画的时间范围内
       else if (currentTime >= startTime && currentTime <= endTime) {
@@ -311,17 +349,18 @@ export default function TransformEditor() {
         });
       } else if (currentTime > endTime) {
         // 动画已结束，保持结束状态
-        const currentTransform: any = {
-          position: { ...endState.position },
-          scale: { ...endState.scale },
-          rotation: endState.rotation || 0
-        };
+        // 深拷贝 endState 以确保所有属性都被保留（包括合并后的 scale 等）
+        const currentTransform = JSON.parse(JSON.stringify(endState));
         
-        // 复制所有其他属性
-        for (const key in endState) {
-          if (key !== 'position' && key !== 'scale' && key !== 'rotation') {
-            currentTransform[key] = endState[key];
-          }
+        // 确保 position 和 scale 是对象
+        if (!currentTransform.position) {
+          currentTransform.position = { x: 0, y: 0 };
+        }
+        if (!currentTransform.scale) {
+          currentTransform.scale = { x: 1, y: 1 };
+        }
+        if (currentTransform.rotation === undefined) {
+          currentTransform.rotation = 0;
         }
         
         targetStates.set(target, {
@@ -335,9 +374,10 @@ export default function TransformEditor() {
     return Array.from(targetStates.values());
   };
 
+  // 在不开启webgal模式或没有对应文件的情况下的默认图片
   useEffect(() => {
     const model = new Image();
-    model.src = "./assets/sakiko_girlfriend.png";
+    model.src = "./assets/sakiko_girlfriend.png"; // 私货
     model.onload = () => setModelImg(model);
 
     const bg = new Image();
@@ -384,7 +424,7 @@ export default function TransformEditor() {
             if (index !== -1) {
               newTransforms[index] = {
                 ...newTransforms[index],
-                transform: animState.transform
+                transform: JSON.parse(JSON.stringify(animState.transform))
               };
             }
           });
@@ -392,6 +432,12 @@ export default function TransformEditor() {
         });
         
         // 继续动画循环
+        requestAnimationFrame(animationLoop);
+      } else if (currentState === null) {
+        // 动画结束，不再继续循环
+        return;
+      } else {
+        // 继续循环等待动画开始
         requestAnimationFrame(animationLoop);
       }
     };

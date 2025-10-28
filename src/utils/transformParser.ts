@@ -155,8 +155,8 @@ export function buildAnimationSequence(transforms: TransformData[]): Array<{
             return;
         }
         
-        // 起始状态：changeFigure 的 transform
-        let currentState = { ...anim.changeFigure.transform };
+        // 起始状态：changeFigure 的 transform（深拷贝以确保完整性）
+        let currentState = JSON.parse(JSON.stringify(anim.changeFigure.transform));
         
         // 处理每个 setTransform
         for (const setTransform of anim.setTransforms) {
@@ -166,12 +166,13 @@ export function buildAnimationSequence(transforms: TransformData[]): Array<{
             const duration = setTransform.duration || 500;
             const ease = setTransform.ease || 'easeInOut';
             
+            // 深拷贝状态以确保所有属性都被正确保留
             animationSequence.push({
                 target: figureID,
                 duration,
                 ease,
-                startState: { ...currentState },
-                endState,
+                startState: JSON.parse(JSON.stringify(currentState)),
+                endState: JSON.parse(JSON.stringify(endState)),
                 startTime: currentTime,
                 endTime: currentTime + duration
             });
@@ -327,14 +328,33 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
             const params = Object.fromEntries(rest.map(s => s.split("=").map(v => v.trim())));
 
             const json = JSON.parse(jsonStr);
-            const transform: any = {
-                ...json,
-                position: {
-                    x: (json.position?.x ?? 0) * scaleX,
-                    y: (json.position?.y ?? 0) * scaleY
-                },
-                scale: json.scale || { x: 1, y: 1 },
-            };
+            const transform: any = {};
+            
+            // 只设置 JSON 中实际存在的属性
+            // 对于 position，如果存在则处理坐标缩放
+            if (json.position !== undefined) {
+                transform.position = {
+                    x: (json.position.x ?? 0) * scaleX,
+                    y: (json.position.y ?? 0) * scaleY
+                };
+            }
+            
+            // 对于 scale，如果存在则直接使用
+            if (json.scale !== undefined) {
+                transform.scale = json.scale;
+            }
+            
+            // 对于 rotation，如果存在则直接使用
+            if (json.rotation !== undefined) {
+                transform.rotation = json.rotation;
+            }
+            
+            // 其他所有属性直接复制
+            for (const key in json) {
+                if (key !== 'position' && key !== 'scale' && key !== 'rotation') {
+                    transform[key] = json[key];
+                }
+            }
 
             return {
                 type: "setTransform",
