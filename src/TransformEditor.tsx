@@ -4,8 +4,8 @@ import { TransformData } from "./types/transform.ts";
 import { exportScript, parseScript, applyFigureIDSystem, buildAnimationSequence } from "./utils/transformParser.ts";
 import CanvasRenderer from "./components/CanvasRenderer.tsx";
 import RotationPanel from "./components/RotationPanel";
-import Modal from "./components/Modal";
-import FilterEditor from "./components/FilterEditor";
+import { invoke } from "@tauri-apps/api/core";
+import { listen, emit } from "@tauri-apps/api/event";
 import { GuideLineType } from "./types/guideLines";
 import WebGALMode from "./components/WebGALMode";
 import { webgalFileManager } from "./utils/webgalFileManager";
@@ -32,7 +32,6 @@ export default function TransformEditor() {
   const [enableFilterPreset, setEnableFilterPreset] = useState(true);
   const [lastAppliedPresetKeys, setLastAppliedPresetKeys] = useState<string[]>([]);
   const [applyFilterToBg, setApplyFilterToBg] = useState(false);
-  const [openFilterModal, setOpenFilterModal] = useState(false);
   const [guideLineType, setGuideLineType] = useState<GuideLineType>('none');
   
   // 动画播放相关状态
@@ -374,6 +373,56 @@ export default function TransformEditor() {
     return Array.from(targetStates.values());
   };
 
+  // 更新滤镜编辑器窗口的数据（使用全局事件）
+  const updateFilterEditorWindow = async () => {
+    try {
+      await emit('filter-editor:update-data', {
+        transforms,
+        selectedIndexes,
+        applyFilterToBg
+      });
+    } catch (error) {
+      console.error('更新滤镜编辑器窗口失败:', error);
+    }
+  };
+
+  // 监听来自滤镜编辑器窗口的 transforms 更新
+  useEffect(() => {
+    const setupListener = async () => {
+      const unlisten = await listen<{ transforms: TransformData[] }>(
+        'filter-editor:transforms-changed',
+        (event) => {
+          // 安全检查：确保 transforms 是数组
+          if (event.payload && Array.isArray(event.payload.transforms)) {
+            setTransforms(event.payload.transforms);
+          } else {
+            console.warn('接收到无效的 transforms 数据:', event.payload);
+          }
+        }
+      );
+      return unlisten;
+    };
+
+    let unlistenFn: (() => void) | null = null;
+    setupListener().then(fn => {
+      unlistenFn = fn;
+    });
+
+    return () => {
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
+  }, []);
+
+  // 当 transforms、selectedIndexes 或 applyFilterToBg 变化时，更新滤镜编辑器窗口
+  useEffect(() => {
+    // 只有在 transforms 是有效数组时才更新
+    if (Array.isArray(transforms)) {
+      updateFilterEditorWindow();
+    }
+  }, [transforms, selectedIndexes, applyFilterToBg]);
+
   // 在不开启webgal模式或没有对应文件的情况下的默认图片
   useEffect(() => {
     const model = new Image();
@@ -684,7 +733,21 @@ export default function TransformEditor() {
           
 
                      {/* 内嵌悬浮面板（不变暗） */}
-           <button onClick={() => setOpenFilterModal(true)}>打开滤镜编辑器</button>
+           <button 
+             onClick={async () => {
+               try {
+                 await invoke('open_filter_editor_window');
+                 // 窗口打开后，发送初始数据
+                 setTimeout(() => {
+                   updateFilterEditorWindow();
+                 }, 500);
+               } catch (error) {
+                 console.error('打开滤镜编辑器窗口失败:', error);
+               }
+             }}
+           >
+             打开滤镜编辑器
+           </button>
            
                        
 
@@ -856,32 +919,11 @@ export default function TransformEditor() {
             onChangeId={() => {}}
           />
 
-          {/* 内嵌悬浮滤镜编辑器（不会让主编辑器变暗） */}
-          <Modal
-            isOpen={openFilterModal}
-            onClose={() => setOpenFilterModal(false)}
-            title="滤镜编辑器"
-            width={500}
-            variant="floating"
-            draggable
-            resizable
-            disableBackdrop
-            mountToBody
-            initialPosition={{ x: 96, y: 96 }}
-          >
-            <FilterEditor
-              transforms={transforms}
-              setTransforms={setTransforms}
-              selectedIndexes={selectedIndexes}
-              applyFilterToBg={applyFilterToBg}
-              setApplyFilterToBg={setApplyFilterToBg}
-            />
-          </Modal>
         </div>
       )}
 
              <h3>Output Script:</h3>
-       <pre>{exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight, ease === "default" ? undefined : ease)}</pre>
+       <pre>{Array.isArray(transforms) ? exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight, ease === "default" ? undefined : ease) : ''}</pre>
     </div>
   );
 }

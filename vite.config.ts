@@ -7,7 +7,13 @@ export default defineConfig({
     plugins: [react()],
     build: {
         outDir: 'dist',
-        emptyOutDir: true
+        emptyOutDir: true,
+        rollupOptions: {
+            input: {
+                main: './index.html',
+                'filter-editor': './filter-editor.html'
+            }
+        }
     },
     server: {
         port: 1421,

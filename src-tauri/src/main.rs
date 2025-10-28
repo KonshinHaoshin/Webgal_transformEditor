@@ -12,6 +12,36 @@ fn get_asset_path() -> String {
 }
 
 #[tauri::command]
+async fn open_filter_editor_window(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    
+    // 检查窗口是否已经存在
+    if let Some(window) = app.get_webview_window("filter-editor") {
+        window.set_focus().map_err(|e| format!("设置焦点失败: {}", e))?;
+        return Ok(());
+    }
+    
+    // 创建新窗口
+    let window = tauri::WebviewWindowBuilder::new(
+        &app,
+        "filter-editor",
+        tauri::WebviewUrl::App("filter-editor.html".into())
+    )
+    .title("滤镜编辑器")
+    .inner_size(600.0, 800.0)
+    .min_inner_size(500.0, 600.0)
+    .resizable(true)
+    .decorations(true)
+    .transparent(false)
+    .build()
+    .map_err(|e| format!("创建窗口失败: {}", e))?;
+    
+    window.set_focus().map_err(|e| format!("设置焦点失败: {}", e))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
 fn start_local_server(base_path: String) -> Result<String, String> {
     unsafe {
         // 如果服务器已经在运行，先停止它
@@ -103,7 +133,7 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_log::Builder::default().build())
-        .invoke_handler(tauri::generate_handler![get_asset_path, scan_directory_recursive, start_local_server])
+        .invoke_handler(tauri::generate_handler![get_asset_path, scan_directory_recursive, start_local_server, open_filter_editor_window])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -30,6 +30,11 @@ export function exportScript(
     baseHeight: number,
     defaultEase?: string
 ): string {
+    // 安全检查：如果 transforms 未定义或不是数组，返回空字符串
+    if (!transforms || !Array.isArray(transforms)) {
+        return '';
+    }
+    
     const scaleRatioX = baseWidth / canvasWidth;
     const scaleRatioY = baseHeight / canvasHeight;
 
