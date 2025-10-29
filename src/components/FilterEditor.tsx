@@ -575,10 +575,12 @@ export default function FilterEditor({
                 <input
                   id={`input-${def.key}`}
                   type="number"
-                  value={values[def.key]}
+                  value={Number.isFinite(values[def.key]) ? values[def.key] : def.def}
                   onChange={(e) => {
-                    const v = clamp(parseFloat(e.target.value), def.min, def.max);
-                    applyKey(def.key, Number.isFinite(v) ? v : def.def);
+                    // 文本输入时立即应用；兜底避免 NaN/undefined
+                    const raw = parseFloat(e.target.value);
+                    const v = Number.isFinite(raw) ? clamp(raw, def.min, def.max) : def.def;
+                    applyKey(def.key, v);
                   }}
                   step={def.step}
                   min={def.min}
@@ -592,8 +594,25 @@ export default function FilterEditor({
                 min={def.min}
                 max={def.max}
                 step={def.step}
-                value={values[def.key]}
-                onChange={(e) => applyKey(def.key, parseFloat(e.target.value))}
+                value={Number.isFinite(values[def.key]) ? values[def.key] : def.def}
+                onInput={(e) => {
+                  // 拖动时仅更新本地显示值，不触发渲染
+                  const raw = parseFloat((e.target as HTMLInputElement).value);
+                  const v = Number.isFinite(raw) ? clamp(raw, def.min, def.max) : def.def;
+                  setValues(prev => ({ ...prev, [def.key]: v }));
+                }}
+                onMouseUp={(e) => {
+                  // 鼠标松开时才应用到 transforms
+                  const raw = parseFloat((e.target as HTMLInputElement).value);
+                  const v = Number.isFinite(raw) ? clamp(raw, def.min, def.max) : def.def;
+                  applyKey(def.key, v);
+                }}
+                onTouchEnd={(e) => {
+                  const target = e.target as HTMLInputElement;
+                  const raw = parseFloat(target.value);
+                  const v = Number.isFinite(raw) ? clamp(raw, def.min, def.max) : def.def;
+                  applyKey(def.key, v);
+                }}
                 style={{ width: "100%" }}
                 aria-label={def.label}
               />
