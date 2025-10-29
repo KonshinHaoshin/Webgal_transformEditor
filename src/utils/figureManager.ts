@@ -205,10 +205,10 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
         const cfg: ModelConfig = {
           path: fullPath,
           id: obj.id,
-          x: obj.x,
-          y: obj.y,
-          xscale: obj.xscale,
-          yscale: obj.yscale,
+          x: typeof obj.x === 'number' ? obj.x : undefined,
+          y: typeof obj.y === 'number' ? obj.y : undefined,
+          xscale: typeof obj.xscale === 'number' ? obj.xscale : undefined,
+          yscale: typeof obj.yscale === 'number' ? obj.yscale : undefined,
         };
 
         // 可选 bounds（如果 JSONL 行里有）
@@ -266,16 +266,24 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
         model.pivot.set(model.width / 2, model.height / 2);
       }
       
-      // 应用每行配置
-      if (x !== undefined) model.x = x;
-      if (y !== undefined) model.y = y;
-      if (xscale !== undefined) model.scale.x = xscale;
-      if (yscale !== undefined) model.scale.y = yscale;
-      
-      // 强制启用交互
-      model.interactive = true;
-      model.buttonMode = false;
+      // 应用每行配置（注意 Live2D 的坐标系统，需要以容器中心为基准）
+      // 模型的位置是相对于容器的，所以直接设置即可
+      if (x !== undefined && typeof x === 'number') model.x = x;
+      if (y !== undefined && typeof y === 'number') model.y = y;
+      if (xscale !== undefined && typeof xscale === 'number') model.scale.x = xscale;
+      if (yscale !== undefined && typeof yscale === 'number') model.scale.y = yscale;
 
+      container.addChild(model);
+      models.push(model);
+      
+      // 更新最大尺寸（考虑位置偏移）
+      const modelRight = (model.x || 0) + model.width * Math.abs(model.scale.x || 1);
+      const modelBottom = (model.y || 0) + model.height * Math.abs(model.scale.y || 1);
+      
+      maxWidth = Math.max(maxWidth, modelRight);
+      maxHeight = Math.max(maxHeight, modelBottom);
+
+      
       // 禁用角度自动控制，避免抖头
       if (model.internalModel?.angleXParamIndex !== undefined) model.internalModel.angleXParamIndex = 999;
       if (model.internalModel?.angleYParamIndex !== undefined) model.internalModel.angleYParamIndex = 999;
@@ -289,15 +297,14 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
         model.internalModel.eyeBlink.nextBlinkTimeLeft = 1000 * 60 * 60 * 24;
       }
 
-      container.addChild(model);
-      models.push(model);
-      
-      // 更新最大尺寸（考虑位置偏移）
-      const modelRight = (model.x || 0) + model.width * Math.abs(model.scale.x || 1);
-      const modelBottom = (model.y || 0) + model.height * Math.abs(model.scale.y || 1);
-      
-      maxWidth = Math.max(maxWidth, modelRight);
-      maxHeight = Math.max(maxHeight, modelBottom);
+      if (paramImport !== null) {
+        try {
+          model.internalModel?.coreModel?.setParamFloat?.('PARAM_IMPORT', paramImport);
+          console.info(`设置 PARAM_IMPORT=${paramImport}给模型: ${modelPath}`);
+        } catch (e) {
+          console.warn(`设置 PARAM_IMPORT 失败给模型: ${modelPath}`, e);
+        }
+      }
 
     } catch (err) {
       console.warn(`加载模型失败：${modelPath}`, err);
@@ -308,17 +315,7 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
     throw new Error('All models failed to load');
   }
 
-  // ✨ 统一设置 PARAM_IMPORT（若 JSONL 末行提供）
-  if (paramImport !== null) {
-    for (const model of models) {
-      try {
-        model.internalModel?.coreModel?.setParamFloat?.('PARAM_IMPORT', paramImport);
-        console.info(`设置 PARAM_IMPORT=${paramImport}`);
-      } catch (e) {
-        console.warn(`设置 PARAM_IMPORT 失败`, e);
-      }
-    }
-  }
+
 
   // 统一显示所有模型
   for (const model of models) {
