@@ -23,7 +23,11 @@ type FilterKey =
   | "bloomThreshold"
   | "bevel"
   | "bevelThickness"
-  | "bevelSoftness";
+  | "bevelRotation"
+  | "bevelSoftness"
+  | "bevelRed"
+  | "bevelGreen"
+  | "bevelBlue";
 
 type Def = {
   key: FilterKey;
@@ -48,7 +52,11 @@ const FILTER_DEFS: Def[] = [
   { key: "bloomThreshold",  label: "Bloom Thresh.",   min: 0,   max: 2,   step: 0.01, def: 0 },
   { key: "bevel",           label: "Bevel",           min: 0,   max: 30,  step: 0.1,  def: 0 },
   { key: "bevelThickness",  label: "Bevel Thick.",    min: 0,   max: 50,  step: 0.1,  def: 0 },
+  { key: "bevelRotation",   label: "Bevel Rotation",  min: 0,   max: 360, step: 1,    def: 0 },
   { key: "bevelSoftness",   label: "Bevel Soft.",     min: 0,   max: 30,  step: 0.1,  def: 0 },
+  { key: "bevelRed",        label: "Bevel R",         min: 0,   max: 255, step: 1,    def: 255 },
+  { key: "bevelGreen",      label: "Bevel G",         min: 0,   max: 255, step: 1,    def: 255 },
+  { key: "bevelBlue",       label: "Bevel B",         min: 0,   max: 255, step: 1,    def: 255 },
 ];
 
 const DEFAULTS: Record<FilterKey, number> = FILTER_DEFS.reduce((acc, d) => {

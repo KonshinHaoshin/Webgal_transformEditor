@@ -5,14 +5,22 @@ export const roundToTwo = (num: number): number => {
     return Math.round(num * 100) / 100;
 };
 
-// 递归保留两位小数
+// 需要保留为整数的属性（颜色值等）
+const INTEGER_KEYS = new Set(['colorRed', 'colorGreen', 'colorBlue', 'bevelRed', 'bevelGreen', 'bevelBlue', 'bevelRotation']);
+
+// 递归保留两位小数（但某些属性保留为整数）
 export const roundTransform = (obj: any): any => {
     if (typeof obj === 'number') {
         return roundToTwo(obj);
     } else if (typeof obj === 'object' && obj !== null) {
         const result: any = Array.isArray(obj) ? [] : {};
         for (const key in obj) {
-            result[key] = roundTransform(obj[key]);
+            // 对于整数属性（如 colorRed, colorGreen, colorBlue, bevelRed, bevelGreen, bevelBlue, bevelRotation），直接取整
+            if (INTEGER_KEYS.has(key) && typeof obj[key] === 'number') {
+                result[key] = Math.round(obj[key]);
+            } else {
+                result[key] = roundTransform(obj[key]);
+            }
         }
         return result;
     } else {
