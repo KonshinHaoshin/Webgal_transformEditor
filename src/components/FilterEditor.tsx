@@ -276,16 +276,23 @@ export default function FilterEditor({
   // 加载预设（支持内置预设和用户预设）
   const loadPreset = (presetName: string) => {
     const preset = getAllPresets[presetName];
-    if (!preset) return;
+    if (!preset) {
+      console.warn(`预设 "${presetName}" 不存在`);
+      return;
+    }
 
     // 检查是否为用户预设
     const isUserPreset = presetName.startsWith("[用户] ");
-    const actualPresetName = isUserPreset ? presetName.substring(4) : presetName;
+    // 安全地移除前缀 "[用户] "（注意：中文字符在 JS 中每个字符占 1 个位置）
+    const actualPresetName = isUserPreset ? presetName.replace("[用户] ", "") : presetName;
     
-    // 如果是用户预设，需要从 userPresets 中找到对应的完整信息
+    // 如果是用户预设，需要从 userPresets 中找到对应的完整信息（可选检查）
     if (isUserPreset) {
       const presetInfo = userPresets.find(p => p.name === actualPresetName);
-      if (!presetInfo) return; // 如果找不到用户预设信息，直接返回
+      if (!presetInfo) {
+        console.warn(`找不到用户预设 "${actualPresetName}" 的完整信息`);
+        // 即使找不到完整信息，也继续加载预设值
+      }
     }
 
     // 应用预设到面板
