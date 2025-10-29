@@ -16,6 +16,16 @@ export default function WebGALMode({
     availableBackgrounds 
 }: WebGALModeProps) {
     const [isExpanded, setIsExpanded] = useState(false);
+    const [figureSearch, setFigureSearch] = useState("");
+    const [backgroundSearch, setBackgroundSearch] = useState("");
+
+    // 过滤文件
+    const filteredFigures = availableFigures.filter(file => 
+        file.toLowerCase().includes(figureSearch.toLowerCase())
+    );
+    const filteredBackgrounds = availableBackgrounds.filter(file => 
+        file.toLowerCase().includes(backgroundSearch.toLowerCase())
+    );
 
     const handleCheckboxChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const isChecked = e.target.checked;
@@ -69,11 +79,12 @@ export default function WebGALMode({
                     <button 
                         onClick={() => setIsExpanded(!isExpanded)}
                         style={{
-                            padding: '2px 8px',
-                            fontSize: '12px',
+                            padding: '4px 12px',
+                            fontSize: '14px',
                             border: '1px solid #ccc',
                             borderRadius: '3px',
                             backgroundColor: '#fff',
+                            color: '#333',
                             cursor: 'pointer'
                         }}
                     >
@@ -92,58 +103,110 @@ export default function WebGALMode({
                 <div style={{ marginTop: '10px' }}>
                     <div style={{ marginBottom: '10px' }}>
                         <strong>立绘文件:</strong>
+                        {/* 搜索框 */}
+                        <input
+                            type="text"
+                            placeholder="搜索立绘文件..."
+                            value={figureSearch}
+                            onChange={(e) => setFigureSearch(e.target.value)}
+                            style={{
+                                width: '100%',
+                                padding: '4px 8px',
+                                marginBottom: '8px',
+                                border: '1px solid #ddd',
+                                borderRadius: '3px',
+                                fontSize: '12px'
+                            }}
+                        />
                         <div style={{ 
-                            maxHeight: '100px', 
+                            maxHeight: '150px', 
                             overflowY: 'auto', 
                             border: '1px solid #ddd', 
-                            padding: '5px',
-                            backgroundColor: '#fff'
+                            padding: '8px',
+                            backgroundColor: '#fff',
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            gap: '4px'
                         }}>
-                            {availableFigures.length > 0 ? (
-                                availableFigures.map((file, index) => (
+                            {filteredFigures.length > 0 ? (
+                                filteredFigures.map((file, index) => (
                                     <div 
                                         key={index}
                                         onClick={() => onFileSelect('figure', file)}
                                         style={{
-                                            padding: '2px 5px',
+                                            padding: '4px 8px',
                                             cursor: 'pointer',
-                                            borderBottom: '1px solid #eee'
+                                            border: '1px solid #eee',
+                                            borderRadius: '3px',
+                                            fontSize: '11px',
+                                            backgroundColor: '#f9f9f9',
+                                            transition: 'background-color 0.2s'
                                         }}
+                                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f0f0f0'}
+                                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9f9f9'}
                                     >
                                         {file}
                                     </div>
                                 ))
                             ) : (
-                                <div style={{ color: '#999' }}>未找到立绘文件</div>
+                                <div style={{ color: '#999', gridColumn: 'span 2', textAlign: 'center' }}>
+                                    {figureSearch ? '未找到匹配的立绘文件' : '未找到立绘文件'}
+                                </div>
                             )}
                         </div>
                     </div>
 
                     <div>
                         <strong>背景文件:</strong>
+                        {/* 搜索框 */}
+                        <input
+                            type="text"
+                            placeholder="搜索背景文件..."
+                            value={backgroundSearch}
+                            onChange={(e) => setBackgroundSearch(e.target.value)}
+                            style={{
+                                width: '100%',
+                                padding: '4px 8px',
+                                marginBottom: '8px',
+                                border: '1px solid #ddd',
+                                borderRadius: '3px',
+                                fontSize: '12px'
+                            }}
+                        />
                         <div style={{ 
-                            maxHeight: '100px', 
+                            maxHeight: '150px', 
                             overflowY: 'auto', 
                             border: '1px solid #ddd', 
-                            padding: '5px',
-                            backgroundColor: '#fff'
+                            padding: '8px',
+                            backgroundColor: '#fff',
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            gap: '4px'
                         }}>
-                            {availableBackgrounds.length > 0 ? (
-                                availableBackgrounds.map((file, index) => (
+                            {filteredBackgrounds.length > 0 ? (
+                                filteredBackgrounds.map((file, index) => (
                                     <div 
                                         key={index}
                                         onClick={() => onFileSelect('background', file)}
                                         style={{
-                                            padding: '2px 5px',
+                                            padding: '4px 8px',
                                             cursor: 'pointer',
-                                            borderBottom: '1px solid #eee'
+                                            border: '1px solid #eee',
+                                            borderRadius: '3px',
+                                            fontSize: '11px',
+                                            backgroundColor: '#f9f9f9',
+                                            transition: 'background-color 0.2s'
                                         }}
+                                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f0f0f0'}
+                                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f9f9f9'}
                                     >
                                         {file}
                                     </div>
                                 ))
                             ) : (
-                                <div style={{ color: '#999' }}>未找到背景文件</div>
+                                <div style={{ color: '#999', gridColumn: 'span 2', textAlign: 'center' }}>
+                                    {backgroundSearch ? '未找到匹配的背景文件' : '未找到背景文件'}
+                                </div>
                             )}
                         </div>
                     </div>

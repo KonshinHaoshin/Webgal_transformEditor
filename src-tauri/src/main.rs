@@ -87,19 +87,76 @@ fn scan_directory_recursive(dir_path: String) -> Result<Vec<String>, String> {
     }
     
     let mut files = Vec::new();
+    let mut excluded_files = std::collections::HashSet::new();
     
-    fn walk_dir(dir: &Path, base_dir: &Path, files: &mut Vec<String>) -> Result<(), String> {
+    fn walk_dir(dir: &Path, base_dir: &Path, files: &mut Vec<String>, excluded_files: &mut std::collections::HashSet<String>) -> Result<(), String> {
+        // 先收集并排序：确保 jsonl/json 先于 png 等被处理，从而先填充 excluded_files
+        let mut entries: Vec<std::path::PathBuf> = Vec::new();
         for entry in fs::read_dir(dir).map_err(|e| format!("读取目录失败: {}", e))? {
             let entry = entry.map_err(|e| format!("读取条目失败: {}", e))?;
-            let path = entry.path();
+            entries.push(entry.path());
+        }
+        entries.sort_by(|a, b| {
+            let a_ext = a.extension().and_then(|e| Some(e.to_string_lossy().to_lowercase())).unwrap_or_default();
+            let b_ext = b.extension().and_then(|e| Some(e.to_string_lossy().to_lowercase())).unwrap_or_default();
+            let a_rank = if a_ext == "jsonl" || a_ext == "json" { 0 } else { 1 };
+            let b_rank = if b_ext == "jsonl" || b_ext == "json" { 0 } else { 1 };
+            a_rank.cmp(&b_rank)
+        });
+        
+        for path in entries.into_iter() {
             
             if path.is_dir() {
-                walk_dir(&path, base_dir, files)?;
+                walk_dir(&path, base_dir, files, excluded_files)?;
             } else if let Some(ext) = path.extension() {
                 let ext_lower = ext.to_string_lossy().to_lowercase();
                 
-                // 对于 JSON 文件，检查是否包含 Live2D 模型字段
-                if ext_lower.as_str() == "json" {
+                // 处理 JSONL 聚合模型文件
+                if ext_lower.as_str() == "jsonl" {
+                    if let Ok(content) = fs::read_to_string(&path) {
+                        // 解析 JSONL，每行一个 JSON 对象
+                        for line in content.lines() {
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                                if let Some(path_str) = json.get("path").and_then(|p| p.as_str()) {
+                                    // 获取父目录
+                                    if let Some(parent_dir) = path.parent() {
+                                        let sub_model_path = parent_dir.join(path_str);
+                                        if let Ok(relative_path) = sub_model_path.strip_prefix(base_dir) {
+                                            let relative_str = relative_path.to_string_lossy().replace('\\', "/");
+                                            excluded_files.insert(relative_str);
+                                            
+                                            // 也读取该子模型，提取 textures
+                                            if sub_model_path.exists() && sub_model_path.is_file() {
+                                                if let Ok(sub_content) = fs::read_to_string(&sub_model_path) {
+                                                    if let Ok(sub_json) = serde_json::from_str::<serde_json::Value>(&sub_content) {
+                                                        if let Some(textures) = sub_json.get("textures").and_then(|t| t.as_array()) {
+                                                            for texture in textures {
+                                                                if let Some(tex_path) = texture.as_str() {
+                                                                    // 纹理路径以子模型 json 所在目录为基准
+                                                                    let tex_base = sub_model_path.parent().unwrap_or(parent_dir);
+                                                                    let tex_full_path = tex_base.join(tex_path);
+                                                                    if let Ok(tex_relative) = tex_full_path.strip_prefix(base_dir) {
+                                                                        excluded_files.insert(tex_relative.to_string_lossy().replace('\\', "/"));
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // JSONL 文件本身应该包含在结果中
+                    let relative_path = path.strip_prefix(base_dir)
+                        .map_err(|e| format!("计算相对路径失败: {}", e))?;
+                    files.push(relative_path.to_string_lossy().replace('\\', "/"));
+                }
+                // 对于普通 JSON 文件，检查是否包含 Live2D 模型字段
+                else if ext_lower.as_str() == "json" {
                     if let Ok(content) = fs::read_to_string(&path) {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
                             // 检查是否包含 model, textures, motions 字段
@@ -108,22 +165,46 @@ fn scan_directory_recursive(dir_path: String) -> Result<Vec<String>, String> {
                                json.get("motions").is_some() {
                                 let relative_path = path.strip_prefix(base_dir)
                                     .map_err(|e| format!("计算相对路径失败: {}", e))?;
-                                files.push(relative_path.to_string_lossy().replace('\\', "/"));
+                                let relative_str = relative_path.to_string_lossy().replace('\\', "/");
+                                
+                                // 提取 textures 并加入排除列表
+                                if let Some(textures) = json.get("textures").and_then(|t| t.as_array()) {
+                                    for texture in textures {
+                                        if let Some(tex_path) = texture.as_str() {
+                                            // 使用 json 文件的父目录作为基准
+                                            if let Some(parent_dir) = path.parent() {
+                                                let tex_full_path = parent_dir.join(tex_path);
+                                                if let Ok(tex_relative) = tex_full_path.strip_prefix(base_dir) {
+                                                    excluded_files.insert(tex_relative.to_string_lossy().replace('\\', "/"));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // 只添加未被排除的文件
+                                if !excluded_files.contains(&relative_str) {
+                                    files.push(relative_str);
+                                }
                             }
                         }
                     }
-                } else if ["jsonl", "png", "jpg", "jpeg", "gif", "bmp", "webp", "webm"].contains(&ext_lower.as_str()) {
-                    // 其他文件类型直接添加
+                } else if ["png", "jpg", "jpeg", "gif", "bmp", "webp", "webm"].contains(&ext_lower.as_str()) {
+                    // 其他文件类型直接添加（但也要排除）
                     let relative_path = path.strip_prefix(base_dir)
                         .map_err(|e| format!("计算相对路径失败: {}", e))?;
-                    files.push(relative_path.to_string_lossy().replace('\\', "/"));
+                    let relative_str = relative_path.to_string_lossy().replace('\\', "/");
+                    // 只添加未被排除的文件
+                    if !excluded_files.contains(&relative_str) {
+                        files.push(relative_str);
+                    }
                 }
             }
         }
         Ok(())
     }
     
-    walk_dir(path, path, &mut files)?;
+    walk_dir(path, path, &mut files, &mut excluded_files)?;
     Ok(files)
 }
 

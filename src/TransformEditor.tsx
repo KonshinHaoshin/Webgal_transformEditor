@@ -46,6 +46,9 @@ export default function TransformEditor() {
   const [availableFigures, setAvailableFigures] = useState<string[]>([]);
   const [availableBackgrounds, setAvailableBackgrounds] = useState<string[]>([]);
 
+  // 可编辑的 output script
+  const [outputScriptLines, setOutputScriptLines] = useState<string[]>([]);
+
   const canvasWidth = 2560;
   const canvasHeight = 1440;
   const baseWidth = 2560;
@@ -639,6 +642,49 @@ export default function TransformEditor() {
       .catch((err) => console.error("❌ Failed to load filter presets:", err));
   }, []);
 
+  // 同步 transforms 到 outputScript
+  useEffect(() => {
+    if (Array.isArray(transforms)) {
+      const script = exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight, ease === "default" ? undefined : ease);
+      const lines = script.split('\n').filter(line => line.trim().length > 0);
+      setOutputScriptLines(lines);
+    }
+  }, [transforms, exportDuration, ease, canvasWidth, canvasHeight, baseWidth, baseHeight]);
+
+  // 处理 output script 编辑
+  const handleOutputScriptChange = async (newScript: string) => {
+    const lines = newScript.split('\n').filter(line => line.trim().length > 0);
+    setOutputScriptLines(lines);
+    
+    // 解析并更新 transforms
+    try {
+      const parsed = parseScript(newScript, scaleX, scaleY).map((t) => {
+        const { __presetApplied, ...rest } = t as any;
+        return rest;
+      });
+      
+      const merged = applyFigureIDSystem(parsed);
+      
+      // 如果启用了 WebGAL 模式，自动加载图片
+      if (selectedGameFolder && newScript.trim()) {
+        await parseAndLoadImages(newScript);
+      }
+      
+      setOriginalTransforms(parsed);
+      setTransforms(merged);
+      setSelectedIndexes([]);
+    } catch (error) {
+      console.error("❌ 解析 output script 失败:", error);
+    }
+  };
+
+  // 删除指定行
+  const handleDeleteLine = (index: number) => {
+    const newLines = outputScriptLines.filter((_, i) => i !== index);
+    const newScript = newLines.join('\n');
+    handleOutputScriptChange(newScript);
+  };
+
 
 
 
@@ -1076,8 +1122,84 @@ export default function TransformEditor() {
         </div>
       )}
 
-             <h3>Output Script:</h3>
-       <pre>{Array.isArray(transforms) ? exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight, ease === "default" ? undefined : ease) : ''}</pre>
+      <h3>Output Script:</h3>
+      <div style={{ 
+        border: '1px solid #ccc', 
+        borderRadius: '4px', 
+        padding: '10px', 
+        backgroundColor: '#f9f9f9',
+        maxHeight: '400px',
+        overflowY: 'auto'
+      }}>
+        {outputScriptLines.length > 0 ? (
+          outputScriptLines.map((line, index) => (
+            <div 
+              key={index} 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                marginBottom: '4px',
+                padding: '4px',
+                backgroundColor: '#fff',
+                borderRadius: '3px',
+                border: '1px solid #e0e0e0'
+              }}
+            >
+              <textarea
+                value={line}
+                onChange={(e) => {
+                  const newLines = [...outputScriptLines];
+                  newLines[index] = e.target.value;
+                  handleOutputScriptChange(newLines.join('\n'));
+                }}
+                style={{
+                  flex: 1,
+                  padding: '2px 4px',
+                  fontSize: '13px',
+                  fontFamily: 'monospace',
+                  border: 'none',
+                  outline: 'none',
+                  resize: 'none',
+                  height: '20px',
+                  lineHeight: '16px',
+                  backgroundColor: 'transparent'
+                }}
+                rows={1}
+                placeholder={`脚本行 ${index + 1}`}
+                aria-label={`脚本行 ${index + 1}`}
+                onKeyDown={(e) => {
+                  // 允许换行
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const newLines = [...outputScriptLines];
+                    newLines[index] += '\n';
+                    handleOutputScriptChange(newLines.join('\n'));
+                  }
+                }}
+              />
+              <button
+                onClick={() => handleDeleteLine(index)}
+                style={{
+                  marginLeft: '8px',
+                  padding: '4px 8px',
+                  fontSize: '12px',
+                  backgroundColor: '#ff4444',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+                title="删除这一行"
+              >
+                ×
+              </button>
+            </div>
+          ))
+        ) : (
+          <div style={{ color: '#999', fontStyle: 'italic' }}>暂无输出脚本</div>
+        )}
+      </div>
     </div>
   );
 }
