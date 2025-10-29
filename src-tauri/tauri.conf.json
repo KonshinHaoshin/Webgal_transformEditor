@@ -22,7 +22,7 @@
     "security": {
       "csp": null
     }
-  },
+    },
   "bundle": {
     "active": true,
     "targets": "all",
@@ -39,5 +39,17 @@
     "opener": null,
     "dialog": null,
     "fs": null
+  },
+  "copyright": "Copyright © 2024 DongshanRandeng",
+  "category": "Utility",
+  "licenseFile": "../LICENSE",
+  "windows": {
+    "wix": {
+      "language": "zh-CN"
+    },
+    "nsis": {
+      "languages": ["SimpChinese"],
+      "installerIcon": "icons/icon.ico"
+    }
   }
 }
