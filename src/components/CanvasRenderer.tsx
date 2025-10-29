@@ -190,7 +190,7 @@ export default function CanvasRenderer(props: Props) {
     }, [canvasRef.current, transforms, bgImg, modelImg]); // 👈 canvasRef.current 在这里作为依赖
 
     useEffect(() => {
-        if (!appRef.current || !modelImg) return;
+        if (!appRef.current) return;
 
         const app = appRef.current;
         const stage = app.stage;

@@ -89,19 +89,155 @@ export default function TransformEditor() {
   };
 
   const handleFileSelect = async (type: 'figure' | 'background', filename: string) => {
-    const blobUrl = await webgalFileManager[type === 'figure' ? 'getFigurePath' : 'getBackgroundPath'](filename);
-    if (blobUrl) {
+    // 获取文件路径（可能是 blob URL 或 HTTP URL）
+    const fileUrl = await webgalFileManager[type === 'figure' ? 'getFigurePath' : 'getBackgroundPath'](filename);
+    if (!fileUrl) {
+      console.warn(`无法获取文件路径: ${filename}`);
+      return;
+    }
+
+    // 确定完整文件路径（用于脚本导出）
+    let filePath = filename;
+    if (type === 'figure') {
+      const fullPath = availableFigures.find(f => f === filename || f.endsWith(`/${filename}`) || f.endsWith(filename));
+      if (fullPath) {
+        filePath = fullPath;
+      }
+    } else {
+      const fullPath = availableBackgrounds.find(f => f === filename || f.endsWith(`/${filename}`) || f.endsWith(filename));
+      if (fullPath) {
+        filePath = fullPath;
+      }
+    }
+
+    // 检测文件类型（检查扩展名）
+    const ext = filePath.split('.').pop()?.toLowerCase();
+    const isLive2D = ext === 'json' || ext === 'jsonl';
+
+    if (type === 'figure') {
+      // 生成新的 figure id
+      const figureId = nextFigureName(transforms);
+
+      if (isLive2D) {
+        // Live2D 模型（json/jsonl）：等待加载完成后再添加 transform
+        console.log(`✅ 准备加载 Live2D 模型: ${filename}`);
+        
+        try {
+          // 先加载模型
+          await figureManager.addFigure(figureId, fileUrl, filePath);
+          console.log(`✅ Live2D 模型加载成功: ${filename}`);
+          
+          // 加载完成后再添加到 transforms
+          setTransforms(prev => {
+            const newChangeFigure: TransformData = {
+              type: "changeFigure",
+              path: filePath,
+              target: figureId,
+              duration: 0,
+              transform: {
+                position: { x: 0, y: 0 },
+                scale: { x: 1, y: 1 }
+              },
+              presetPosition: 'center',
+              extraParams: {}
+            };
+            const newTransforms = [...prev, newChangeFigure];
+            setSelectedIndexes([prev.length]);
+            return newTransforms;
+          });
+        } catch (error) {
+          console.error(`❌ Live2D 模型加载失败: ${filename}`, error);
+          alert(`Live2D 模型加载失败: ${error}`);
+        }
+      } else {
+        // 普通图片：也通过 figureManager 加载，不设置全局 modelImg
+        const img = new Image();
+        img.onload = async () => {
+          console.log(`✅ 已加载立绘: ${filename}`);
+          
+          try {
+            // 使用 figureManager 加载图片
+            await figureManager.addFigure(figureId, fileUrl, filePath);
+            
+            // 加载完成后再添加到 transforms
+            setTransforms(prev => {
+              const newChangeFigure: TransformData = {
+                type: "changeFigure",
+                path: filePath,
+                target: figureId,
+                duration: 0,
+                transform: {
+                  position: { x: 0, y: 0 },
+                  scale: { x: 1, y: 1 }
+                },
+                presetPosition: 'center',
+                extraParams: {}
+              };
+              const newTransforms = [...prev, newChangeFigure];
+              setSelectedIndexes([prev.length]);
+              return newTransforms;
+            });
+          } catch (error) {
+            console.error(`❌ 图片加载到 figureManager 失败: ${filename}`, error);
+            // 即使失败也添加 transform，让渲染器回退到其他方式
+            setTransforms(prev => {
+              const newChangeFigure: TransformData = {
+                type: "changeFigure",
+                path: filePath,
+                target: figureId,
+                duration: 0,
+                transform: {
+                  position: { x: 0, y: 0 },
+                  scale: { x: 1, y: 1 }
+                },
+                presetPosition: 'center',
+                extraParams: {}
+              };
+              const newTransforms = [...prev, newChangeFigure];
+              setSelectedIndexes([prev.length]);
+              return newTransforms;
+            });
+          }
+        };
+        img.onerror = () => {
+          console.error(`❌ 图片加载失败: ${filename}`);
+        };
+        img.src = fileUrl;
+      }
+    } else {
+      // 背景文件（通常不会是 json/jsonl，但为了安全也检查一下）
+      if (isLive2D) {
+        console.warn(`⚠️ 背景文件不支持 Live2D 格式: ${filename}`);
+        return;
+      }
+      
       const img = new Image();
       img.onload = () => {
-        if (type === 'figure') {
-          setModelImg(img);
-          console.log(`✅ 已加载立绘: ${filename}`);
-        } else {
-          setBgImg(img);
-          console.log(`✅ 已加载背景: ${filename}`);
-        }
+        setBgImg(img);
+        console.log(`✅ 已加载背景: ${filename}`);
+        
+        // 添加到 transforms 数组
+        setTransforms(prev => {
+          const newChangeBg: TransformData = {
+            type: "changeBg",
+            path: filePath,
+            target: "bg-main",
+            duration: 0,
+            transform: {
+              position: { x: 0, y: 0 },
+              scale: { x: 1, y: 1 }
+            },
+            extraParams: {}
+          };
+          const newTransforms = [...prev, newChangeBg];
+          setSelectedIndexes([prev.length]);
+          return newTransforms;
+        });
       };
-      img.src = blobUrl;
+      img.onerror = () => {
+        console.error(`❌ 背景图片加载失败: ${filename}`);
+      };
+      img.src = fileUrl;
     }
   };
 
@@ -527,10 +663,9 @@ export default function TransformEditor() {
         }}
       >
         💡 <strong>操作提示：</strong>
-        <br />・Ctrl + 滚轮：缩放模型/背景
-        <br />・Alt + 拖动：旋转选中对象
-        <br />・Shift + 点击：多选对象
-        <br />・关注 <strong>东山燃灯寺</strong> 谢谢喵~
+        <br />・Ctrl + 滚轮：缩放模型/背景 ・Alt + 拖动：旋转选中对象 ・Shift + 点击：多选对象
+        <br /> ・在开启观测层时，无法拖拽或旋转模型，但可以正常调色、使用滤镜等
+        <br />・关注 B站<strong>东山燃灯寺</strong> 谢谢喵~
       </p>
 
       <textarea
@@ -708,7 +843,6 @@ export default function TransformEditor() {
              aria-label="选择辅助线类型"
            >
              <option value="none">无辅助线</option>
-             <option value="grid-3x3">九宫格</option>
              <option value="rule-of-thirds">三分法</option>
              <option value="center-cross">中心十字</option>
              <option value="diagonal">对角线</option>
