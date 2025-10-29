@@ -328,6 +328,9 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
         }
     }
 
+    // 维护每个 target 的当前 transform 状态，用于增量更新
+    const targetStates = new Map<string, any>();
+
     return lines.map((line) => {
         const [command, ...rest] = line.split(" -");
 
@@ -336,37 +339,51 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
             const params = Object.fromEntries(rest.map(s => s.split("=").map(v => v.trim())));
 
             const json = JSON.parse(jsonStr);
-            const transform: any = {};
+            const target = params.target;
             
-            // 只设置 JSON 中实际存在的属性
-            // 对于 position，如果存在则处理坐标缩放
+            // 获取当前 target 的状态（如果存在）
+            const currentState = targetStates.get(target) || {
+                position: { x: 0, y: 0 },
+                scale: { x: 1, y: 1 }
+            };
+            
+            // 增量合并 transform：只更新提供的字段，未提供的字段继承当前状态
+            const transform: any = { ...currentState };
+            
+            // 处理 position：如果 JSON 中有 position，只更新提供的 x 或 y
             if (json.position !== undefined) {
                 transform.position = {
-                    x: (json.position.x ?? 0) * scaleX,
-                    y: (json.position.y ?? 0) * scaleY
+                    x: json.position.x !== undefined ? (json.position.x * scaleX) : currentState.position?.x ?? 0,
+                    y: json.position.y !== undefined ? (json.position.y * scaleY) : currentState.position?.y ?? 0
                 };
             }
             
-            // 对于 scale，如果存在则直接使用
+            // 处理 scale：如果 JSON 中有 scale，只更新提供的 x 或 y
             if (json.scale !== undefined) {
-                transform.scale = json.scale;
+                transform.scale = {
+                    x: json.scale.x !== undefined ? json.scale.x : (currentState.scale?.x ?? 1),
+                    y: json.scale.y !== undefined ? json.scale.y : (currentState.scale?.y ?? 1)
+                };
             }
             
-            // 对于 rotation，如果存在则直接使用
+            // 对于 rotation，如果存在则更新，否则保持当前值
             if (json.rotation !== undefined) {
                 transform.rotation = json.rotation;
             }
             
-            // 其他所有属性直接复制
+            // 其他所有属性：如果 JSON 中有则更新，否则保持当前值
             for (const key in json) {
                 if (key !== 'position' && key !== 'scale' && key !== 'rotation') {
                     transform[key] = json[key];
                 }
             }
 
+            // 更新 target 的状态
+            targetStates.set(target, transform);
+
             return {
                 type: "setTransform",
-                target: params.target,
+                target: target,
                 duration: parseInt(params.duration || "500"),
                 transform,
                 ease: params.ease
@@ -415,10 +432,15 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
 
             if (!presetPosition) presetPosition = 'center';
 
+            const target = params.id || "unknown";
+            
+            // 更新 target 的状态为 changeFigure 的 transform
+            targetStates.set(target, transform);
+
             return {
                 type: "changeFigure",
                 path,
-                target: params.id || "unknown",
+                target: target,
                 duration: 0,
                 transform,
                 presetPosition, // ✅ 记录预设位
@@ -456,6 +478,9 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
                     params[k] = ""; // 支持 -next 等无值参数
                 }
             }
+
+            // 更新背景的状态
+            targetStates.set("bg-main", transform);
 
             return {
                 type: "changeBg",
