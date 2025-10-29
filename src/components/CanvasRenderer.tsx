@@ -240,10 +240,15 @@ export default function CanvasRenderer(props: Props) {
                         (displayObject as any).anchor?.set(0.5);
                     }
                 } else if (modelImg) {
-                    // 回退到默认 modelImg
-                    displayObject = PIXI.Sprite.from(modelImg);
-                    imgWidth = modelImg.width;
-                    imgHeight = modelImg.height;
+                    // 回退到默认 modelImg（但如果是 Live2D json/jsonl，则避免回退以防闪烁）
+                    const isLive2DRef = t.type === 'changeFigure' && typeof (t as any).path === 'string' && (
+                        (t as any).path.endsWith('.json') || (t as any).path.endsWith('.jsonl')
+                    );
+                    if (!isLive2DRef) {
+                        displayObject = PIXI.Sprite.from(modelImg);
+                        imgWidth = modelImg.width;
+                        imgHeight = modelImg.height;
+                    }
                 }
             }
             

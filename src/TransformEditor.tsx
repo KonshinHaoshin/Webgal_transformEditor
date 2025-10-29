@@ -36,6 +36,13 @@ export default function TransformEditor() {
   // 观察层模式："none" | "color" | "luminosity"
   const [overlayMode, setOverlayMode] = useState<"none" | "color" | "luminosity">("none");
   
+  // 自适应 textarea 高度
+  const adjustTextareaHeight = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  };
+  
   // 动画播放相关状态
   const [isPlaying, setIsPlaying] = useState(false);
   const [animationStartTime, setAnimationStartTime] = useState<number | null>(null);
@@ -711,6 +718,8 @@ export default function TransformEditor() {
         💡 <strong>操作提示：</strong>
         <br />・Ctrl + 滚轮：缩放模型/背景 ・Alt + 拖动：旋转选中对象 ・Shift + 点击：多选对象
         <br /> ・在开启观测层时，无法拖拽或旋转模型，但可以正常调色、使用滤镜等
+        <br /> ・在使用jsonl聚合模型的时候，请务必在jsonl文件的最后一行添加import参数或者设置相应的x和y值
+        <br /> ・在编辑<strong>Output Script</strong>的时候，直接编辑并不会立刻应用，请点击其他地方或按Enter键       
         <br />・关注 B站<strong>东山燃灯寺</strong> 谢谢喵~
       </p>
 
@@ -1146,11 +1155,15 @@ export default function TransformEditor() {
               }}
             >
               <textarea
+                ref={(el) => adjustTextareaHeight(el)}
                 value={line}
                 onChange={(e) => {
+                  const el = e.target as HTMLTextAreaElement;
+                  adjustTextareaHeight(el);
                   const newLines = [...outputScriptLines];
                   newLines[index] = e.target.value;
-                  handleOutputScriptChange(newLines.join('\n'));
+                  // 仅更新本地行状态，不立即解析应用
+                  setOutputScriptLines(newLines);
                 }}
                 style={{
                   flex: 1,
@@ -1160,22 +1173,30 @@ export default function TransformEditor() {
                   border: 'none',
                   outline: 'none',
                   resize: 'none',
-                  height: '20px',
+                  height: 'auto',
+                  minHeight: '20px',
                   lineHeight: '16px',
-                  backgroundColor: 'transparent'
+                  overflowY: 'hidden',
+                  backgroundColor: 'transparent',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all'
                 }}
                 rows={1}
                 placeholder={`脚本行 ${index + 1}`}
                 aria-label={`脚本行 ${index + 1}`}
                 onKeyDown={(e) => {
-                  // 允许换行
+                  // Enter 提交；Shift+Enter 插入换行
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
+                    handleOutputScriptChange(outputScriptLines.join('\n'));
+                  } else if (e.key === 'Enter' && e.shiftKey) {
+                    e.preventDefault();
                     const newLines = [...outputScriptLines];
-                    newLines[index] += '\n';
-                    handleOutputScriptChange(newLines.join('\n'));
+                    newLines[index] = (newLines[index] || '') + '\n';
+                    setOutputScriptLines(newLines);
                   }
                 }}
+                onBlur={() => handleOutputScriptChange(outputScriptLines.join('\n'))}
               />
               <button
                 onClick={() => handleDeleteLine(index)}
