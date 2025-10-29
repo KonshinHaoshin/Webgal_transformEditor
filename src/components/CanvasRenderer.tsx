@@ -592,11 +592,11 @@ export default function CanvasRenderer(props: Props) {
             overlaySprite.width = canvasWidth;
             overlaySprite.height = canvasHeight;
             
-            // 设置观察层完全不可交互，让事件穿透到后面的内容
-            overlaySprite.interactive = false;
+            // 设置观察层可交互，阻止事件穿透到下层，禁止拖动
+            overlaySprite.interactive = true;
             overlaySprite.buttonMode = false;
-            overlaySprite.hitArea = null; // 明确设置为null，表示不拦截任何事件
-            overlaySprite.cursor = "inherit"; // 继承光标样式，不显示手型
+            overlaySprite.hitArea = new PIXI.Rectangle(0, 0, canvasWidth, canvasHeight); // 覆盖整个画布
+            overlaySprite.cursor = "default"; // 默认光标样式
             
             // 创建和应用混合模式 Filter（传入场景纹理）
             const blendFilter = new OverlayBlendFilter(overlayMode, sceneTexture);
@@ -608,7 +608,7 @@ export default function CanvasRenderer(props: Props) {
                 filter: blendFilter,
             };
             // 观察层添加到最上层
-            // 由于设置了interactive=false和hitArea=null，事件会穿透到下层对象
+            // 由于设置了interactive=true和hitArea，事件不会穿透，从而禁止拖动
             stage.addChild(overlaySprite);
         } else {
             // 移除观察层（如果存在）
