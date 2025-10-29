@@ -72,8 +72,8 @@ export default function CanvasRenderer(props: Props) {
             width: canvasWidth,
             height: canvasHeight,
             backgroundAlpha: 0,
-            resolution: window.devicePixelRatio || 1,
-            autoDensity: true,
+            resolution: 1, // 固定分辨率，无视屏幕缩放
+            autoDensity: false, // 禁用自动密度调整，无视屏幕缩放
         });
 
         // 确保 stage 可以接收全局事件，用于拖拽
@@ -561,10 +561,10 @@ export default function CanvasRenderer(props: Props) {
                 tempSceneContainer.addChild(child);
             });
             
-            // 渲染到RenderTexture，明确指定完整的canvas区域和正确的分辨率
+            // 渲染到RenderTexture，明确指定完整的canvas区域和固定的分辨率
             const sceneTexture = app.renderer.generateTexture(tempSceneContainer, {
                 scaleMode: PIXI.SCALE_MODES.LINEAR,
-                resolution: window.devicePixelRatio || 1,
+                resolution: 1, // 固定分辨率，无视屏幕缩放
                 region: new PIXI.Rectangle(0, 0, canvasWidth, canvasHeight),
             });
             
