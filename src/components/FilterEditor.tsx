@@ -83,8 +83,8 @@ export default function FilterEditor({
   // 面板显示值（从当前选中或默认初始化）
   const [values, setValues] = useState<Record<FilterKey, number>>(DEFAULTS);
   
-  // 选择应用范围
-  const [applyScope, setApplyScope] = useState<"selected" | "allFigures" | "allFiguresAndBg">("selected");
+  // 选择应用范围 - 使用勾选ID的方式
+  const [selectedFilterTargets, setSelectedFilterTargets] = useState<Set<string>>(new Set());
 
   // 预设管理相关状态
   const [allPresets, setAllPresets] = useState<Record<string, any>>({}); // 内置预设
@@ -94,25 +94,69 @@ export default function FilterEditor({
   const [newPresetDescription, setNewPresetDescription] = useState("");
   const [selectedPreset, setSelectedPreset] = useState<string>("");
 
+  // 获取所有可用的target ID列表（用于勾选）
+  const availableTargetIds = useMemo(() => {
+    const targets = new Set<string>();
+    transforms.forEach(t => {
+      if (t.type === 'changeFigure' || t.type === 'changeBg' || t.type === 'setTransform') {
+        if (t.target) targets.add(t.target);
+      }
+    });
+    return Array.from(targets).sort();
+  }, [transforms]);
+
   // 首选"选中项的第一项"，否则使用第一个非背景项，否则就背景项
   const sourceTransform = useMemo(() => {
+    // 如果勾选了特定的ID，优先使用第一个勾选的ID
+    if (selectedFilterTargets.size > 0) {
+      const firstSelectedId = Array.from(selectedFilterTargets)[0];
+      const targetTransform = transforms.find(t => t.target === firstSelectedId);
+      if (targetTransform) return targetTransform.transform;
+    }
+    // 否则使用选中的索引
     if (selectedIndexes.length > 0) {
       const idx = selectedIndexes[0];
       return transforms[idx]?.transform;
     }
     const firstNonBg = transforms.find(t => t.target !== "bg-main");
     return firstNonBg?.transform ?? transforms.find(t => t.target === "bg-main")?.transform;
-  }, [transforms, selectedIndexes]);
+  }, [transforms, selectedIndexes, selectedFilterTargets]);
 
   // 获取当前编辑的目标名称
   const currentTargetName = useMemo(() => {
+    // 如果勾选了特定的ID，显示第一个勾选的ID
+    if (selectedFilterTargets.size > 0) {
+      const firstSelectedId = Array.from(selectedFilterTargets)[0];
+      return firstSelectedId;
+    }
+    // 否则使用选中的索引
     if (selectedIndexes.length > 0) {
       const idx = selectedIndexes[0];
       return transforms[idx]?.target || "未知目标";
     }
     const firstNonBg = transforms.find(t => t.target !== "bg-main");
     return firstNonBg?.target || "未选择目标";
-  }, [transforms, selectedIndexes]);
+  }, [transforms, selectedIndexes, selectedFilterTargets]);
+
+  // 当 availableTargetIds 变化时，如果没有勾选任何ID，自动勾选所有ID（默认全部启用）
+  useEffect(() => {
+    if (availableTargetIds.length > 0 && selectedFilterTargets.size === 0) {
+      setSelectedFilterTargets(new Set(availableTargetIds));
+    } else if (availableTargetIds.length === 0) {
+      setSelectedFilterTargets(new Set());
+    } else {
+      // 移除已不存在的ID
+      const validTargets = new Set<string>();
+      selectedFilterTargets.forEach(id => {
+        if (availableTargetIds.includes(id)) {
+          validTargets.add(id);
+        }
+      });
+      if (validTargets.size !== selectedFilterTargets.size) {
+        setSelectedFilterTargets(validTargets);
+      }
+    }
+  }, [availableTargetIds]);
 
   // 当选择变化或 transforms 变化时，同步面板显示值（保留缺失字段的默认值）
   useEffect(() => {
@@ -167,24 +211,9 @@ export default function FilterEditor({
     setValues(prev => ({ ...prev, [key]: num }));
     
     setTransforms(prev =>
-      prev.map((t, i) => {
-        let shouldApply = false;
-        
-        // 根据应用范围决定是否应用
-        switch (applyScope) {
-          case "selected":
-            // 只对选中的对象生效
-            shouldApply = selectedIndexes.includes(i);
-            break;
-          case "allFigures":
-            // 对所有立绘生效（不包括背景）
-            shouldApply = t.target !== "bg-main";
-            break;
-          case "allFiguresAndBg":
-            // 对所有立绘和背景生效
-            shouldApply = true;
-            break;
-        }
+      prev.map((t) => {
+        // 只对勾选的target ID生效
+        const shouldApply = selectedFilterTargets.has(t.target || "");
         
         if (!shouldApply) return t;
 
@@ -205,21 +234,9 @@ export default function FilterEditor({
     setValues(DEFAULTS);
     
     setTransforms(prev =>
-      prev.map((t, i) => {
-        let shouldApply = false;
-        
-        // 根据应用范围决定是否应用
-        switch (applyScope) {
-          case "selected":
-            shouldApply = selectedIndexes.includes(i);
-            break;
-          case "allFigures":
-            shouldApply = t.target !== "bg-main";
-            break;
-          case "allFiguresAndBg":
-            shouldApply = true;
-            break;
-        }
+      prev.map((t) => {
+        // 只对勾选的target ID生效
+        const shouldApply = selectedFilterTargets.has(t.target || "");
         
         if (!shouldApply) return t;
 
@@ -308,20 +325,9 @@ export default function FilterEditor({
     
     // 应用预设到 transforms
     setTransforms(prev =>
-      prev.map((t, i) => {
-        let shouldApply = false;
-        
-        switch (applyScope) {
-          case "selected":
-            shouldApply = selectedIndexes.includes(i);
-            break;
-          case "allFigures":
-            shouldApply = t.target !== "bg-main";
-            break;
-          case "allFiguresAndBg":
-            shouldApply = true;
-            break;
-        }
+      prev.map((t) => {
+        // 只对勾选的target ID生效
+        const shouldApply = selectedFilterTargets.has(t.target || "");
         
         if (!shouldApply) return t;
 
@@ -372,48 +378,71 @@ export default function FilterEditor({
         </span>
       </div>
 
-      {/* 应用范围选择 */}
+      {/* 应用范围选择 - 勾选ID方式 */}
       <div style={{ marginBottom: 16 }}>
         <label style={{ 
           display: "block", 
           fontSize: "14px", 
           fontWeight: "600", 
-          marginBottom: "8px",
+          marginBottom: "10px",
           color: "#374151"
         }}>
           应用范围：
         </label>
-        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-            <input
-              type="radio"
-              name="applyScope"
-              value="selected"
-              checked={applyScope === "selected"}
-              onChange={(e) => setApplyScope(e.target.value as any)}
-            />
-            <span>仅选中对象 ({selectedIndexes.length} 个)</span>
-          </label>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-            <input
-              type="radio"
-              name="applyScope"
-              value="allFigures"
-              checked={applyScope === "allFigures"}
-              onChange={(e) => setApplyScope(e.target.value as any)}
-            />
-            <span>所有立绘</span>
-          </label>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-            <input
-              type="radio"
-              name="applyScope"
-              value="allFiguresAndBg"
-              checked={applyScope === "allFiguresAndBg"}
-              onChange={(e) => setApplyScope(e.target.value as any)}
-            />
-            <span>所有立绘 + 背景</span>
-          </label>
+        <div style={{ 
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "12px",
+          alignItems: "center",
+          border: "1px solid #ddd", 
+          borderRadius: "4px", 
+          padding: "10px",
+          backgroundColor: "#f9f9f9"
+        }}>
+          {availableTargetIds.length === 0 ? (
+            <div style={{ color: "#999", fontStyle: "italic" }}>暂无立绘或背景</div>
+          ) : (
+            availableTargetIds.map(target => {
+              const transform = transforms.find(t => 
+                (t.type === 'changeFigure' || t.type === 'changeBg') && t.target === target
+              );
+              const isBg = transform?.type === 'changeBg' || target === 'bg-main';
+              
+              return (
+                <label 
+                  key={target}
+                  style={{ 
+                    display: "flex", 
+                    alignItems: "center", 
+                    cursor: "pointer",
+                    userSelect: "none",
+                    whiteSpace: "nowrap"
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedFilterTargets.has(target)}
+                    onChange={(e) => {
+                      const newSelected = new Set(selectedFilterTargets);
+                      if (e.target.checked) {
+                        newSelected.add(target);
+                      } else {
+                        newSelected.delete(target);
+                      }
+                      setSelectedFilterTargets(newSelected);
+                    }}
+                    style={{ marginRight: "6px", cursor: "pointer" }}
+                  />
+                  <span style={{ 
+                    color: isBg ? "#e74c3c" : "#333",
+                    fontWeight: isBg ? "bold" : "normal"
+                  }}>
+                    {target}
+                  </span>
+                </label>
+              );
+            })
+          )}
         </div>
       </div>
 
@@ -621,9 +650,7 @@ export default function FilterEditor({
         })}
       </div>
 
-      <p style={{ fontSize: 12, color: "#666", marginTop: 10 }}>
-        提示：选择应用范围后，滤镜效果将应用到相应的对象上。勾选"也作用于背景"才会改动 bg-main。
-      </p>
+
 
       {/* 保存预设的模态框 */}
       {showPresetModal && (
