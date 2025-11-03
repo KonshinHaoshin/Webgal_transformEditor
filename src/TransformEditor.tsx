@@ -901,6 +901,9 @@ export default function TransformEditor() {
   }, []);
 
   // 当 transforms 更新时，自动将所有新的 target 添加到 enabledTargets（默认全部启用）
+  // 使用 useRef 来存储上一次的 targets 集合，避免不必要的更新
+  const prevTargetsRef = useRef<Set<string>>(new Set());
+  
   useEffect(() => {
     if (transforms.length > 0) {
       const targets = new Set<string>();
@@ -910,27 +913,44 @@ export default function TransformEditor() {
         }
       });
       
+      // 比较 targets 集合是否有变化（使用字符串集合比较）
+      const currentTargetsStr = Array.from(targets).sort().join(',');
+      const prevTargetsStr = Array.from(prevTargetsRef.current).sort().join(',');
+      
+      // 如果 targets 集合没有变化（只是 transforms 数组引用改变了），不更新 enabledTargets
+      if (currentTargetsStr === prevTargetsStr) {
+        return;
+      }
+      
+      // 更新 ref
+      prevTargetsRef.current = new Set(targets);
+      
       // 如果当前 enabledTargets 为空，或者有新的 target 出现，自动添加到 enabledTargets
       const currentTargets = Array.from(enabledTargets);
       const allTargets = Array.from(targets);
       const newTargets = allTargets.filter(t => !enabledTargets.has(t));
+      const removedTargets = currentTargets.filter(t => !targets.has(t));
       
-      // 如果有新的 target 出现，自动添加；如果是第一次加载（enabledTargets 为空），全部启用
-      if (currentTargets.length === 0 || newTargets.length > 0) {
-        // 合并现有的和新出现的 target，并移除已不存在的 target
-        const validTargets = new Set<string>();
-        transforms.forEach(t => {
-          if (t.type === 'changeFigure' || t.type === 'changeBg') {
-            validTargets.add(t.target);
-          }
-        });
-        setEnabledTargets(validTargets);
+      // 只在以下情况更新：
+      // 1. 第一次加载（enabledTargets 为空）- 全部启用
+      // 2. 有新的 target 出现 - 只添加新的 target，保留现有的选择
+      // 3. 有 target 被移除 - 从 enabledTargets 中移除不存在的 target
+      if (currentTargets.length === 0) {
+        // 第一次加载，全部启用
+        setEnabledTargets(new Set(allTargets));
+      } else if (newTargets.length > 0 || removedTargets.length > 0) {
+        // 有新 target 出现或旧 target 被移除，只更新变化的部分，保留其他选择
+        const updatedTargets = new Set(enabledTargets);
+        newTargets.forEach(target => updatedTargets.add(target));
+        removedTargets.forEach(target => updatedTargets.delete(target));
+        setEnabledTargets(updatedTargets);
       }
     } else {
       // 如果 transforms 为空，清空 enabledTargets
       if (enabledTargets.size > 0) {
         setEnabledTargets(new Set());
       }
+      prevTargetsRef.current = new Set();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transforms]);
@@ -1149,13 +1169,13 @@ export default function TransformEditor() {
             return;
           }
           
-          // 为每个 target 创建新的 setTransform
+          // 为每个 target 创建新的 setTransform（不包含 position 和 scale）
           const newItems: TransformData[] = targetsWithoutSetTransform.map((target) => {
             const newItem: TransformData = {
               type: "setTransform",
               target: target,
               duration: 0,
-              transform: { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } },
+              transform: {}, // 不预设 position 和 scale
             };
             if (target !== "bg-main") {
               (newItem as any).presetPosition = "center";

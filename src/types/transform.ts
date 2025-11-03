@@ -3,8 +3,9 @@ export interface TransformData {
     target: string;
     duration: number;
     transform: {
-        position: { x: number; y: number };
-        scale: { x: number; y: number };
+        position?: { x: number; y: number };
+        scale?: { x: number; y: number };
+        rotation?: number;
         [key: string]: any;
     };
     path?: string; // 对于 changeFigure，保存路径

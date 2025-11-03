@@ -53,17 +53,34 @@ export function exportScript(
         }
 
         // 构建导出用的 transform 对象，确保保留所有属性（包括滤镜参数）
-        const transform = {
-            ...obj.transform,
-            position: {
+        const transform: any = {};
+        
+        // 只在 position 存在时才添加 position
+        if (obj.transform.position !== undefined) {
+            transform.position = {
                 x: obj.transform.position.x * scaleRatioX,
                 y: obj.transform.position.y * scaleRatioY,
-            },
-            // 确保 scale 值不被修改，保持原始的 x 和 y 值
-            scale: obj.transform.scale || { x: 1, y: 1 }
-            // 其他所有属性（brightness, contrast, saturation, gamma, colorRed, colorGreen, colorBlue 等）
-            // 都通过 ...obj.transform 被保留
-        };
+            };
+        }
+        
+        // 只在 scale 存在时才添加 scale
+        if (obj.transform.scale !== undefined) {
+            transform.scale = obj.transform.scale;
+        }
+        
+        // 只在 rotation 存在时才添加 rotation
+        if (obj.transform.rotation !== undefined) {
+            transform.rotation = obj.transform.rotation;
+        }
+        
+        // 添加所有其他属性（滤镜参数等）
+        for (const key in obj.transform) {
+            if (key !== 'position' && key !== 'scale' && key !== 'rotation') {
+                transform[key] = obj.transform[key];
+            }
+        }
+        
+        // 如果 transform 是空对象，导出一个空对象 {}
         const roundedTransform = roundTransform(transform);
         const transformJson = JSON.stringify(roundedTransform);
 
@@ -80,6 +97,7 @@ export function exportScript(
                 easeParam = ` -ease=${defaultEase}`;
             }
             // 如果 obj.ease 是 undefined，不使用 ease 参数（保持原始状态）
+            // 如果 transform 是空对象，导出 setTransform:{} 格式
             return `setTransform:${transformJson} -target=${obj.target} -duration=${exportDuration}${easeParam} -next;`;
         }
 
@@ -386,8 +404,7 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
             
             // 获取当前 target 的状态（如果存在）
             const currentState = targetStates.get(target) || {
-                position: { x: 0, y: 0 },
-                scale: { x: 1, y: 1 }
+                position: { x: 0, y: 0 }
             };
             
             // 增量合并 transform：只更新提供的字段，未提供的字段继承当前状态
@@ -396,17 +413,25 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
             // 处理 position：如果 JSON 中有 position，只更新提供的 x 或 y
             if (json.position !== undefined) {
                 transform.position = {
-                    x: json.position.x !== undefined ? (json.position.x * scaleX) : currentState.position?.x ?? 0,
-                    y: json.position.y !== undefined ? (json.position.y * scaleY) : currentState.position?.y ?? 0
+                    x: json.position.x !== undefined ? (json.position.x * scaleX) : (currentState.position?.x ?? 0),
+                    y: json.position.y !== undefined ? (json.position.y * scaleY) : (currentState.position?.y ?? 0)
                 };
             }
             
-            // 处理 scale：如果 JSON 中有 scale，只更新提供的 x 或 y
+            // 处理 scale：如果 JSON 中有 scale，只更新提供的 x 或 y；如果没有提供，不预设 scale
             if (json.scale !== undefined) {
                 transform.scale = {
-                    x: json.scale.x !== undefined ? json.scale.x : (currentState.scale?.x ?? 1),
-                    y: json.scale.y !== undefined ? json.scale.y : (currentState.scale?.y ?? 1)
+                    x: json.scale.x !== undefined ? json.scale.x : (currentState.scale?.x ?? undefined),
+                    y: json.scale.y !== undefined ? json.scale.y : (currentState.scale?.y ?? undefined)
                 };
+                // 如果 scale 的两个值都是 undefined，移除 scale 属性
+                if (transform.scale.x === undefined && transform.scale.y === undefined) {
+                    delete transform.scale;
+                } else if (transform.scale.x === undefined) {
+                    transform.scale.x = currentState.scale?.x;
+                } else if (transform.scale.y === undefined) {
+                    transform.scale.y = currentState.scale?.y;
+                }
             }
             
             // 对于 rotation，如果存在则更新，否则保持当前值

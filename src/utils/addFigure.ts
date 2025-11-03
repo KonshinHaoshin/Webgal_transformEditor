@@ -70,18 +70,19 @@ export function addFigureTransform(p: AddFigureParams) {
     // 这里你的渲染横纵都乘用了相同 scale，所以取任一轴即可
     const solvedScale = targetW / (modelOriginalWidth * scaleX);
 
-    const transform = {
+    const transform: any = {
         type: "setTransform" as const,
         target: key,
         duration,
         transform: {
             position: { x: logicX, y: logicY },
-            scale: { x: solvedScale, y: solvedScale },
             rotation: 0,
         },
         // 你有需要也可以把 zIndex 之类塞进 extraParams
         extraParams: {} as Record<string, string>,
     };
+    
+    // 不预设 scale，让用户手动设置或从 changeFigure 继承
 
     return transform;
 }

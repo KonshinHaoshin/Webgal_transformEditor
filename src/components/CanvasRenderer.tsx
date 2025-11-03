@@ -169,6 +169,10 @@ export default function CanvasRenderer(props: Props) {
                                             t => t.type === 'setTransform' && t.target === selectedObj.target
                                         );
                                         if (setTransformIdx !== -1) {
+                                            // 如果 scale 不存在，先创建它
+                                            if (!copy[setTransformIdx].transform.scale) {
+                                                copy[setTransformIdx].transform.scale = { x: 1, y: 1 };
+                                            }
                                             copy[setTransformIdx].transform.scale.x = newScale;
                                             copy[setTransformIdx].transform.scale.y = newScale;
                                         }
@@ -192,6 +196,10 @@ export default function CanvasRenderer(props: Props) {
                                     t => t.type === 'setTransform' && t.target === obj.target
                                 );
                                 if (setTransformIdx !== -1) {
+                                    // 如果 scale 不存在，先创建它
+                                    if (!copy[setTransformIdx].transform.scale) {
+                                        copy[setTransformIdx].transform.scale = { x: 1, y: 1 };
+                                    }
                                     copy[setTransformIdx].transform.scale.x = newScale;
                                     copy[setTransformIdx].transform.scale.y = newScale;
                                 }
@@ -222,6 +230,10 @@ export default function CanvasRenderer(props: Props) {
                                     t => t.type === 'setTransform' && t.target === selectedObj.target
                                 );
                                 if (setTransformIdx !== -1) {
+                                    // 如果 scale 不存在，先创建它
+                                    if (!copy[setTransformIdx].transform.scale) {
+                                        copy[setTransformIdx].transform.scale = { x: 1, y: 1 };
+                                    }
                                     copy[setTransformIdx].transform.scale.x = newScale;
                                     copy[setTransformIdx].transform.scale.y = newScale;
                                 }
@@ -293,15 +305,30 @@ export default function CanvasRenderer(props: Props) {
                         "bevelRed", "bevelGreen", "bevelBlue"
                     ];
                     
+                    // 合并 transform：只使用 setTransform 中的 position、scale、rotation
+                    // 滤镜参数始终从 changeFigure/changeBg 中获取，不从 setTransform 中获取
                     transformToUse = {
                         ...t.transform, // 先使用 changeFigure/changeBg 的 transform（包含滤镜参数）
-                        ...setTransform.transform, // 然后用 setTransform 的 transform 覆盖（position, scale, rotation）
                     };
                     
-                    // 确保滤镜参数不会被 setTransform 覆盖（如果 setTransform 中没有定义这些参数）
+                    // 只从 setTransform 中提取 position、scale、rotation（如果存在）
+                    if (setTransform.transform.position !== undefined) {
+                        transformToUse.position = setTransform.transform.position;
+                    }
+                    if (setTransform.transform.scale !== undefined) {
+                        transformToUse.scale = setTransform.transform.scale;
+                    }
+                    if (setTransform.transform.rotation !== undefined) {
+                        transformToUse.rotation = setTransform.transform.rotation;
+                    }
+                    
+                    // 确保滤镜参数不会被 setTransform 覆盖（setTransform 不应该包含滤镜参数）
                     for (const key of filterKeys) {
-                        if (setTransform.transform[key] === undefined && t.transform[key] !== undefined) {
-                            transformToUse[key] = t.transform[key];
+                        if (setTransform.transform[key] !== undefined) {
+                            // 如果 setTransform 中意外包含了滤镜参数，忽略它，使用 changeFigure/changeBg 的值
+                            if (t.transform[key] !== undefined) {
+                                transformToUse[key] = t.transform[key];
+                            }
                         }
                     }
                 }
@@ -617,7 +644,10 @@ export default function CanvasRenderer(props: Props) {
                                         );
                                         
                                         if (setTransformIdx !== -1) {
-                                            // 更新 setTransform 的 position
+                                            // 更新 setTransform 的 position（如果不存在则创建）
+                                            if (!copy[setTransformIdx].transform.position) {
+                                                copy[setTransformIdx].transform.position = { x: 0, y: 0 };
+                                            }
                                             if (!lockX) {
                                                 copy[setTransformIdx].transform.position.x = initialPos.x + deltaX / scaleX;
                                             }

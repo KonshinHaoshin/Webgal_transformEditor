@@ -217,7 +217,14 @@ export default function FilterEditor({
         
         if (!shouldApply) return t;
 
-        // 写回到 transform - 确保保留所有已有属性，并更新当前键的值
+        // 对于 setTransform，只更新滤镜参数，不写入 position、scale、rotation（除非它们已经存在）
+        if (t.type === "setTransform") {
+          const nextTransform = { ...t.transform };
+          nextTransform[key] = num;
+          return { ...t, transform: nextTransform };
+        }
+
+        // 对于 changeFigure/changeBg，正常更新
         const nextTransform = {
           ...t.transform,
           [key]: num
@@ -340,7 +347,13 @@ export default function FilterEditor({
           "bevelRed", "bevelGreen", "bevelBlue"
         ];
 
-        // 彻底完全替换：只保留非滤镜属性（position, scale, rotation），完全替换所有滤镜参数
+        // 对于 setTransform，不应该写入滤镜参数！滤镜参数只在 changeFigure/changeBg 中
+        if (t.type === "setTransform") {
+          // 不更新 setTransform，直接返回（滤镜参数不应该写入 setTransform）
+          return t;
+        }
+
+        // 对于 changeFigure/changeBg，彻底完全替换：只保留非滤镜属性（position, scale, rotation），完全替换所有滤镜参数
         const nextTransform: any = {
           // 保留基础属性
           position: t.transform.position || { x: 0, y: 0 },
