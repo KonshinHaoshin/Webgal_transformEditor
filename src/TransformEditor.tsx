@@ -850,13 +850,10 @@ export default function TransformEditor() {
           animationFrameCounterRef.current = 0;
         }
         animationFrameCounterRef.current++;
-        
-        // 不再更新 React state，完全由 CanvasRenderer 的独立动画循环处理
-        
+                
         // 继续动画循环
         requestAnimationFrame(animationLoop);
       } else if (currentState === null) {
-        // 动画结束，恢复原始的 setTransform 状态
         // 先恢复 setTransform，再设置 isPlaying(false)，确保 outputScriptLines 同步时使用恢复后的值
         setTransforms(prev => {
           const newTransforms = [...prev];
@@ -868,13 +865,6 @@ export default function TransformEditor() {
               // 恢复原始的 setTransform 状态
               const restored = JSON.parse(JSON.stringify(originalSetTransform));
               newTransforms[setTransformIndex] = restored;
-              console.log(`🎬 恢复原始 setTransform [${target}]:`, {
-                transform: restored.transform,
-                ease: restored.ease,
-                duration: restored.duration,
-                position: restored.transform.position,
-                savedPosition: originalSetTransform.transform.position
-              });
             }
           });
           return newTransforms;
@@ -882,9 +872,6 @@ export default function TransformEditor() {
         
         // 标记刚刚从动画恢复，让 useEffect 跳过更新（必须在恢复之前设置）
         justRestoredFromAnimationRef.current = true;
-        
-        // 注意：不再恢复旧的 outputScriptLines，而是基于恢复后的 transforms 重新生成
-        // 这样可以确保 outputScriptLines 和 transforms 保持同步
         
         // 清除动画状态 ref（先清除，避免动画循环继续更新）
         animationStateRef.current = null;
