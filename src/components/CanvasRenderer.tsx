@@ -25,6 +25,8 @@ interface Props {
     lockY: boolean;
     guideLineType?: GuideLineType;
     overlayMode?: "none" | "color" | "luminosity"; // 观察层模式
+    enabledTargets?: Set<string>; // 启用的target列表
+    enabledTargetsArray?: string[]; // 启用的target列表（数组形式，用于触发重新渲染）
 }
 
 export default function CanvasRenderer(props: Props) {
@@ -36,7 +38,9 @@ export default function CanvasRenderer(props: Props) {
         // @ts-ignore
         bgBaseScaleRef, setTransforms, setSelectedIndexes, lockX, lockY,
         guideLineType = 'none',
-        overlayMode = 'none'
+        overlayMode = 'none',
+        enabledTargets = new Set(),
+        enabledTargetsArray = []
     } = props;
 
     const appRef = useRef<PIXI.Application | null>(null);
@@ -101,9 +105,14 @@ export default function CanvasRenderer(props: Props) {
             const delta = e.deltaY < 0 ? 0.05 : -0.05;
 
             // 检查是否点击到了某个对象
+            // 注意：只检查 changeFigure 和 changeBg，不检查 setTransform
             let hitObject = false;
             for (let index = transforms.length - 1; index >= 0; index--) {
                 const obj = transforms[index];
+                // 跳过 setTransform，因为它们不应该直接响应滚轮事件
+                if (obj.type === 'setTransform' || obj.type === 'rawText') {
+                    continue;
+                }
                 const { x, y } = obj.transform.position;
                 const scale = obj.transform.scale.x;
                 const isBg = obj.target === 'bg-main';
@@ -135,39 +144,66 @@ export default function CanvasRenderer(props: Props) {
                 if (mx >= cx - w / 2 && mx <= cx + w / 2 && my >= cy - h / 2 && my <= cy + h / 2) {
                     hitObject = true;
                     
-                    // 如果当前对象被选中，则缩放所有选中的对象
-                    if (selectedIndexes.includes(index)) {
+                    // 如果有选中的对象，只缩放选中的对象（严格只缩放 selectedIndexes 中的项目，不包括背景）
+                    if (selectedIndexes.length > 0) {
                         setTransforms(prev => {
                             const copy = [...prev];
+                            // 严格只缩放 selectedIndexes 中的对象，不缩放其他任何对象（包括背景）
                             selectedIndexes.forEach(selectedIndex => {
                                 const selectedObj = copy[selectedIndex];
                                 if (selectedObj) {
+                                    // 如果选中的是 setTransform，直接缩放它
+                                    // 如果选中的是 changeFigure/changeBg，也需要缩放它（可能需要同时缩放对应的 setTransform）
                                     const currentScale = selectedObj.transform.scale?.x || 1;
                                     const newScale = Math.max(0.1, currentScale + delta);
                                     copy[selectedIndex].transform.scale.x = newScale;
                                     copy[selectedIndex].transform.scale.y = newScale;
+                                    
+                                    // 如果选中的是 changeFigure/changeBg，也需要更新对应的 setTransform（如果有）
+                                    if ((selectedObj.type === 'changeFigure' || selectedObj.type === 'changeBg')) {
+                                        const setTransformIdx = copy.findIndex(
+                                            t => t.type === 'setTransform' && t.target === selectedObj.target
+                                        );
+                                        if (setTransformIdx !== -1) {
+                                            copy[setTransformIdx].transform.scale.x = newScale;
+                                            copy[setTransformIdx].transform.scale.y = newScale;
+                                        }
+                                    }
                                 }
                             });
                             return copy;
                         });
+                        // 找到选中的对象后就退出，不再处理其他对象
+                        break;
                     } else {
-                        // 如果点击的对象没有被选中，只缩放该对象
+                        // 如果没有选中的对象，只缩放当前鼠标下的对象
                         const newScale = Math.max(0.1, scale + delta);
                         setTransforms(prev => {
                             const copy = [...prev];
                             copy[index].transform.scale.x = newScale;
                             copy[index].transform.scale.y = newScale;
+                            // 如果这是 changeFigure/changeBg，也需要更新对应的 setTransform（如果有）
+                            if ((obj.type === 'changeFigure' || obj.type === 'changeBg')) {
+                                const setTransformIdx = copy.findIndex(
+                                    t => t.type === 'setTransform' && t.target === obj.target
+                                );
+                                if (setTransformIdx !== -1) {
+                                    copy[setTransformIdx].transform.scale.x = newScale;
+                                    copy[setTransformIdx].transform.scale.y = newScale;
+                                }
+                            }
                             return copy;
                         });
+                        break;
                     }
-                    break;
                 }
             }
 
-            // 如果没有点击到任何对象，但有选中的对象，则缩放所有选中的对象
+            // 如果没有点击到任何对象，但有选中的对象，则只缩放所有选中的对象（严格只缩放 selectedIndexes 中的对象）
             if (!hitObject && selectedIndexes.length > 0) {
                 setTransforms(prev => {
                     const copy = [...prev];
+                    // 严格只缩放 selectedIndexes 中的对象
                     selectedIndexes.forEach(selectedIndex => {
                         const selectedObj = copy[selectedIndex];
                         if (selectedObj) {
@@ -175,6 +211,17 @@ export default function CanvasRenderer(props: Props) {
                             const newScale = Math.max(0.1, currentScale + delta);
                             copy[selectedIndex].transform.scale.x = newScale;
                             copy[selectedIndex].transform.scale.y = newScale;
+                            
+                            // 如果选中的是 changeFigure/changeBg，也需要更新对应的 setTransform（如果有）
+                            if ((selectedObj.type === 'changeFigure' || selectedObj.type === 'changeBg')) {
+                                const setTransformIdx = copy.findIndex(
+                                    t => t.type === 'setTransform' && t.target === selectedObj.target
+                                );
+                                if (setTransformIdx !== -1) {
+                                    copy[setTransformIdx].transform.scale.x = newScale;
+                                    copy[setTransformIdx].transform.scale.y = newScale;
+                                }
+                            }
                         }
                     });
                     return copy;
@@ -423,9 +470,23 @@ export default function CanvasRenderer(props: Props) {
             nameText.position.set(container.x, container.y - drawH / 2 - 10);
             stage.addChild(nameText);
 
-            // 🧠 注册交互
+            // 🧠 注册交互（只有启用的target才能交互）
+            const isTargetEnabled = enabledTargets.has(t.target) || enabledTargets.size === 0;
+            
+            if (!isTargetEnabled) {
+                // 如果target未启用，禁用交互
+                sprite.interactive = false;
+            } else {
+                sprite.interactive = true;
+            }
+            
             sprite
                 .on("pointerdown", (e: any) => {
+                    // 检查target是否启用
+                    if (!enabledTargets.has(t.target) && enabledTargets.size > 0) {
+                        return; // 未启用的target不允许交互
+                    }
+                    
                     const original = e.data.originalEvent as PointerEvent; // 🟡 获取原始键盘状态
                     const isAlt = original?.altKey;
                     const isShift = original?.shiftKey;
@@ -703,7 +764,7 @@ export default function CanvasRenderer(props: Props) {
         if (existingGuideLines) {
             stage.addChild(existingGuideLines);
         }
-    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY, overlayMode, canvasWidth, canvasHeight]);
+    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY, overlayMode, canvasWidth, canvasHeight, enabledTargets, enabledTargetsArray]);
 
     // 独立的辅助线渲染逻辑
     useEffect(() => {

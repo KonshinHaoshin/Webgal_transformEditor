@@ -20,6 +20,21 @@ export default function TransformEditor() {
   const [dragging] = useState<number | null>(null);
   const [modelImg, setModelImg] = useState<HTMLImageElement | null>(null);
   const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
+  
+  // 包装 setSelectedIndexes，过滤掉未启用的target
+  const setSelectedIndexesFiltered = (indexes: number[] | ((prev: number[]) => number[])) => {
+    setSelectedIndexes(prev => {
+      const newIndexes = typeof indexes === 'function' ? indexes(prev) : indexes;
+      // 如果启用了target过滤，则只保留启用的target
+      if (enabledTargets.size > 0) {
+        return newIndexes.filter(idx => {
+          const t = transforms[idx];
+          return enabledTargets.has(t.target);
+        });
+      }
+      return newIndexes;
+    });
+  };
   const [, setAllSelected] = useState(false);
   const [lockX, setLockX] = useState(false);
   const [lockY, setLockY] = useState(false);
@@ -35,6 +50,8 @@ export default function TransformEditor() {
   const [guideLineType, setGuideLineType] = useState<GuideLineType>('none');
   // 观察层模式："none" | "color" | "luminosity"
   const [overlayMode, setOverlayMode] = useState<"none" | "color" | "luminosity">("none");
+  // 启用的立绘和背景列表（Set<target>）
+  const [enabledTargets, setEnabledTargets] = useState<Set<string>>(new Set());
   
   // 自适应 textarea 高度
   const adjustTextareaHeight = (el: HTMLTextAreaElement | null) => {
@@ -1333,6 +1350,86 @@ export default function TransformEditor() {
             </option>
           ))}
         </select>
+        
+        {/* 立绘和背景启用列表 */}
+        <div style={{ marginTop: 20 }}>
+          <label style={{ display: "block", marginBottom: 10, fontWeight: "bold", color: "#333" }}>
+            启用立绘和背景（勾选后可编辑）：
+          </label>
+          <div style={{ 
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "12px",
+            alignItems: "center",
+            border: "1px solid #ddd", 
+            borderRadius: "4px", 
+            padding: "10px",
+            backgroundColor: "#f9f9f9"
+          }}>
+            {(() => {
+              // 提取所有立绘和背景的 target
+              const targets = new Set<string>();
+              transforms.forEach(t => {
+                if (t.type === 'changeFigure' || t.type === 'changeBg') {
+                  targets.add(t.target);
+                }
+              });
+              
+              if (targets.size === 0) {
+                return <div style={{ color: "#999", fontStyle: "italic" }}>暂无立绘或背景</div>;
+              }
+              
+              return Array.from(targets).map(target => {
+                const transform = transforms.find(t => 
+                  (t.type === 'changeFigure' || t.type === 'changeBg') && t.target === target
+                );
+                const isBg = transform?.type === 'changeBg' || target === 'bg-main';
+                
+                return (
+                  <label 
+                    key={target}
+                    style={{ 
+                      display: "flex", 
+                      alignItems: "center", 
+                      cursor: "pointer",
+                      userSelect: "none",
+                      whiteSpace: "nowrap"
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={enabledTargets.has(target)}
+                      onChange={(e) => {
+                        const newEnabled = new Set(enabledTargets);
+                        if (e.target.checked) {
+                          newEnabled.add(target);
+                        } else {
+                          newEnabled.delete(target);
+                          // 如果取消勾选，同时取消选中该target的项目
+                          setSelectedIndexesFiltered(prev => {
+                            return prev.filter(idx => {
+                              const t = transforms[idx];
+                              return t.target !== target;
+                            });
+                          });
+                        }
+                        // 创建新的 Set 对象以触发 React 重新渲染
+                        setEnabledTargets(new Set(newEnabled));
+                      }}
+                      style={{ marginRight: "6px", cursor: "pointer" }}
+                    />
+                    <span style={{ 
+                      color: isBg ? "#e74c3c" : "#333",
+                      fontWeight: isBg ? "bold" : "normal"
+                    }}>
+                      {target}
+                    </span>
+                  </label>
+                );
+              });
+            })()}
+          </div>
+        </div>
       </div>
 
       <div style={{ display: "flex", justifyContent: "center", marginTop: 20, position: "relative" }}>
@@ -1374,7 +1471,7 @@ export default function TransformEditor() {
           transforms={transforms}
           setTransforms={setTransforms}
           selectedIndexes={selectedIndexes}
-          setSelectedIndexes={setSelectedIndexes}
+          setSelectedIndexes={setSelectedIndexesFiltered}
           modelImg={modelImg}
           bgImg={bgImg}
           baseWidth={baseWidth}
@@ -1388,6 +1485,8 @@ export default function TransformEditor() {
           lockY={lockY}
           guideLineType={guideLineType}
           overlayMode={overlayMode}
+          enabledTargets={enabledTargets}
+          enabledTargetsArray={Array.from(enabledTargets)}
         />
       </div>
 
