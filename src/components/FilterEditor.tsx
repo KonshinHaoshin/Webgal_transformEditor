@@ -93,6 +93,9 @@ export default function FilterEditor({
   const [newPresetName, setNewPresetName] = useState("");
   const [newPresetDescription, setNewPresetDescription] = useState("");
   const [selectedPreset, setSelectedPreset] = useState<string>("");
+  
+  // 位置预设相关状态
+  const [positionPresets, setPositionPresets] = useState<Record<string, any>>({});
 
   // 获取所有可用的target ID列表（用于勾选）
   const availableTargetIds = useMemo(() => {
@@ -175,6 +178,12 @@ export default function FilterEditor({
       .then((res) => res.json())
       .then((data) => setAllPresets(data))
       .catch((err) => console.error("❌ Failed to load filter presets:", err));
+    
+    // 加载位置预设
+    fetch("/position-presets.json")
+      .then((res) => res.json())
+      .then((data) => setPositionPresets(data))
+      .catch((err) => console.error("❌ Failed to load position presets:", err));
   }, []);
 
   // 加载用户自定义预设
@@ -508,7 +517,7 @@ export default function FilterEditor({
               fontSize: "12px"
             }}
           >
-            保存当前设置
+            保存当前滤镜设置
           </button>
         </div>
 
@@ -542,6 +551,164 @@ export default function FilterEditor({
           >
             <option value="">选择一个预设...</option>
             {Object.keys(getAllPresets).map(key => (
+              <option key={key} value={key}>
+                {key}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* 位置预设选择 */}
+        <div style={{ marginTop: 16, marginBottom: 12 }}>
+          <label style={{ 
+            display: "block", 
+            fontSize: "12px", 
+            marginBottom: "4px",
+            color: "#374151"
+          }}>
+            位置预设：
+          </label>
+          <select
+            onChange={(e) => {
+              const presetName = e.target.value;
+              if (!presetName) return;
+              
+              const preset = positionPresets[presetName];
+              if (!preset) {
+                console.warn(`位置预设 "${presetName}" 不存在`);
+                return;
+              }
+
+              // 找到最新的 setTransform 或 changeFigure/changeBg 语句（优先选中的，否则找最后一个）
+              setTransforms((prev) => {
+                const copy = [...prev];
+                
+                // 如果有选中的项目，优先使用选中的 setTransform 或 changeFigure/changeBg
+                let targetIndex = -1;
+                let targetId = "";
+                
+                if (selectedIndexes.length > 0) {
+                  // 从选中的项目中找到最新的 setTransform 或 changeFigure/changeBg
+                  for (let i = selectedIndexes.length - 1; i >= 0; i--) {
+                    const idx = selectedIndexes[i];
+                    const item = copy[idx];
+                    if (item && (item.type === 'setTransform' || item.type === 'changeFigure' || item.type === 'changeBg')) {
+                      targetIndex = idx;
+                      targetId = item.target;
+                      break;
+                    }
+                  }
+                }
+                
+                // 如果没有选中的，找到对应 changeFigure/changeBg 的 setTransform
+                if (targetIndex === -1) {
+                  // 先找到最新的 changeFigure 或 changeBg
+                  for (let i = copy.length - 1; i >= 0; i--) {
+                    const item = copy[i];
+                    if (item && (item.type === 'changeFigure' || item.type === 'changeBg')) {
+                      targetId = item.target;
+                      // 优先使用 changeFigure/changeBg 本身
+                      targetIndex = i;
+                      // 如果没有 position 或 scale，再找对应的 setTransform
+                      if (!item.transform.position && !item.transform.scale) {
+                        for (let j = copy.length - 1; j >= 0; j--) {
+                          const setTransform = copy[j];
+                          if (setTransform && setTransform.type === 'setTransform' && setTransform.target === targetId) {
+                            targetIndex = j;
+                            break;
+                          }
+                        }
+                      }
+                      break;
+                    }
+                  }
+                }
+                
+                // 如果还是找不到，使用最新的 setTransform 或 changeFigure/changeBg
+                if (targetIndex === -1) {
+                  // 优先找 changeFigure/changeBg
+                  for (let i = copy.length - 1; i >= 0; i--) {
+                    if (copy[i] && (copy[i].type === 'changeFigure' || copy[i].type === 'changeBg')) {
+                      targetIndex = i;
+                      targetId = copy[i].target;
+                      break;
+                    }
+                  }
+                  // 如果没找到 changeFigure/changeBg，再找 setTransform
+                  if (targetIndex === -1) {
+                    for (let i = copy.length - 1; i >= 0; i--) {
+                      if (copy[i] && copy[i].type === 'setTransform') {
+                        targetIndex = i;
+                        targetId = copy[i].target;
+                        break;
+                      }
+                    }
+                  }
+                }
+                
+                if (targetIndex === -1) {
+                  alert("没有找到可应用位置预设的语句！");
+                  return copy;
+                }
+                
+                // 应用预设：部分替换 position 和 scale（只替换预设中提供的字段，保留原有值）
+                const updatedTransform = { ...copy[targetIndex] };
+                const newTransform: any = { ...updatedTransform.transform };
+                
+                // 部分替换 position（只替换预设中提供的字段）
+                if (preset.position) {
+                  // 确保 position 对象存在
+                  if (!newTransform.position) {
+                    newTransform.position = { x: 0, y: 0 };
+                  }
+                  // 只替换预设中提供的字段，保留原有值
+                  if (preset.position.x !== undefined && preset.position.x !== null) {
+                    newTransform.position.x = preset.position.x;
+                  }
+                  if (preset.position.y !== undefined && preset.position.y !== null) {
+                    newTransform.position.y = preset.position.y;
+                  }
+                }
+                
+                // 部分替换 scale（只替换预设中提供的字段）
+                if (preset.scale) {
+                  // 确保 scale 对象存在
+                  if (!newTransform.scale) {
+                    newTransform.scale = { x: 1, y: 1 };
+                  }
+                  // 只替换预设中提供的字段，保留原有值
+                  if (preset.scale.x !== undefined && preset.scale.x !== null) {
+                    newTransform.scale.x = preset.scale.x;
+                  }
+                  if (preset.scale.y !== undefined && preset.scale.y !== null) {
+                    newTransform.scale.y = preset.scale.y;
+                  }
+                }
+                
+                updatedTransform.transform = newTransform;
+                copy[targetIndex] = updatedTransform;
+                
+                return copy;
+              });
+              
+              // 重置选择框
+              e.target.value = "";
+            }}
+            style={{
+              width: "100%",
+              padding: "6px 8px",
+              border: "1px solid #d1d5db",
+              borderRadius: "4px",
+              fontSize: "12px"
+            }}
+            aria-label="选择位置预设"
+            title="选择位置预设"
+            defaultValue=""
+          >
+            <option value="" disabled>
+              选择一个位置预设...
+            </option>
+            {Object.keys(positionPresets).map((key) => (
               <option key={key} value={key}>
                 {key}
               </option>

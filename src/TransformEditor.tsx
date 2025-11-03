@@ -46,6 +46,7 @@ export default function TransformEditor() {
   const [enableFilterPreset, setEnableFilterPreset] = useState(true);
   const [lastAppliedPresetKeys, setLastAppliedPresetKeys] = useState<string[]>([]);
   const [applyFilterToBg, setApplyFilterToBg] = useState(false);
+  
   const [guideLineType, setGuideLineType] = useState<GuideLineType>('none');
   // 观察层模式："none" | "color" | "luminosity"
   const [overlayMode, setOverlayMode] = useState<"none" | "color" | "luminosity">("none");
@@ -106,6 +107,10 @@ export default function TransformEditor() {
   const isAnimatingRef = useRef(false);
   // 标记是否刚刚从动画恢复（用于防止恢复后的 outputScriptLines 被覆盖）
   const justRestoredFromAnimationRef = useRef(false);
+  // 动画状态 ref（用于优化性能，不触发 React 重新渲染）
+  const animationStateRef = useRef<Map<string, any> | null>(null);
+  // 动画帧计数器（用于减少 React state 更新频率）
+  const animationFrameCounterRef = useRef(0);
 
   // WebGAL 模式相关状态
   const [selectedGameFolder, setSelectedGameFolder] = useState<string | null>(null);
@@ -400,16 +405,28 @@ export default function TransformEditor() {
             
             const target = params.target;
             if (target) {
-              // 将逻辑坐标转换为画布坐标（和 parseScript 一样的转换）
-              // outputScriptLines 中的值是逻辑坐标，需要转换为画布坐标（乘以 scaleX/scaleY）
-              const transform = {
-                ...json,
-                position: {
-                  x: (json.position?.x || 0) * scaleX,
-                  y: (json.position?.y || 0) * scaleY
-                },
-                scale: json.scale || { x: 1, y: 1 }
+              const transform: any = {
+                ...json
               };
+              
+              if (json.position) {
+                // outputScriptLines 中的值是逻辑坐标（通过 exportScript 转换的）
+                // exportScript: 画布坐标 * (baseWidth/canvasWidth) = 逻辑坐标
+                // 恢复时需要：逻辑坐标 / (baseWidth/canvasWidth) = 画布坐标
+                // 即：逻辑坐标 * (canvasWidth/baseWidth) = 逻辑坐标 / scaleRatio = 画布坐标
+                // scaleRatio = baseWidth / canvasWidth，所以：画布坐标 = 逻辑坐标 / scaleRatio = 逻辑坐标 * (canvasWidth/baseWidth)
+                const scaleRatioX = baseWidth / canvasWidth;
+                const scaleRatioY = baseHeight / canvasHeight;
+                transform.position = {
+                  x: json.position.x !== undefined && json.position.x !== null ? json.position.x / scaleRatioX : 0,
+                  y: json.position.y !== undefined && json.position.y !== null ? json.position.y / scaleRatioY : 0
+                };
+              }
+              
+              // scale 不需要转换，直接使用
+              if (!transform.scale) {
+                transform.scale = { x: 1, y: 1 };
+              }
               
               const originalState: TransformData = {
                 type: 'setTransform',
@@ -819,37 +836,22 @@ export default function TransformEditor() {
     const animationLoop = () => {
       const currentState = getCurrentAnimationState();
       if (currentState && Array.isArray(currentState)) {
-        // 更新 transforms 以显示当前动画状态
-        // 注意：现在需要更新 setTransform，而不是 changeFigure
-        setTransforms(prev => {
-          const newTransforms = [...prev];
-          currentState.forEach((animState: any) => {
-            // 查找对应的 setTransform（如果有）
-            const setTransformIndex = newTransforms.findIndex(
-              t => t.type === "setTransform" && t.target === animState.target
-            );
-            
-            if (setTransformIndex !== -1) {
-              // 更新 setTransform 的 transform
-              newTransforms[setTransformIndex] = {
-                ...newTransforms[setTransformIndex],
-                transform: JSON.parse(JSON.stringify(animState.transform))
-              };
-            } else {
-              // 如果没有 setTransform，查找 changeFigure/changeBg（向后兼容）
-              const changeIndex = newTransforms.findIndex(
-                t => (t.type === "changeFigure" || t.type === "changeBg") && t.target === animState.target
-              );
-              if (changeIndex !== -1) {
-                newTransforms[changeIndex] = {
-                  ...newTransforms[changeIndex],
-                  transform: JSON.parse(JSON.stringify(animState.transform))
-                };
-              }
-            }
-          });
-          return newTransforms;
+        // 优化性能：使用 ref 存储动画状态，避免触发 React 重新渲染
+        // 将动画状态转换为 Map 格式，便于快速查找
+        const stateMap = new Map<string, any>();
+        currentState.forEach((animState: any) => {
+          stateMap.set(animState.target, animState.transform);
         });
+        animationStateRef.current = stateMap;
+        
+        // 减少更新频率：只在关键帧更新 React state（每 3 帧更新一次，约 20fps）
+        // 但动画状态 ref 仍然每帧更新，保证动画流畅
+        if (!animationFrameCounterRef.current) {
+          animationFrameCounterRef.current = 0;
+        }
+        animationFrameCounterRef.current++;
+        
+        // 不再更新 React state，完全由 CanvasRenderer 的独立动画循环处理
         
         // 继续动画循环
         requestAnimationFrame(animationLoop);
@@ -878,37 +880,50 @@ export default function TransformEditor() {
           return newTransforms;
         });
         
-        // 恢复原始的 outputScriptLines（避免精度损失）
-        // 先保存，再恢复，然后再清空
-        const savedOutputScriptLines = originalOutputScriptLinesRef.current.length > 0 
-          ? [...originalOutputScriptLinesRef.current] 
-          : [];
+        // 标记刚刚从动画恢复，让 useEffect 跳过更新（必须在恢复之前设置）
+        justRestoredFromAnimationRef.current = true;
         
-        if (savedOutputScriptLines.length > 0) {
-          setOutputScriptLines([...savedOutputScriptLines]);
-          console.log(`🎬 恢复原始 outputScriptLines (避免精度损失)`);
-        }
+        // 注意：不再恢复旧的 outputScriptLines，而是基于恢复后的 transforms 重新生成
+        // 这样可以确保 outputScriptLines 和 transforms 保持同步
         
-        // 清空保存的原始状态
-        originalSetTransformsRef.current.clear();
-        originalOutputScriptLinesRef.current = [];
+        // 清除动画状态 ref（先清除，避免动画循环继续更新）
+        animationStateRef.current = null;
+        animationFrameCounterRef.current = 0;
         
-        // 使用 setTimeout 确保恢复完成后再设置 isPlaying(false)
-        // 并且确保 outputScriptLines 的同步逻辑不会覆盖恢复的值
+        // 设置状态（但保持 justRestoredFromAnimationRef 为 true，防止 useEffect 覆盖）
+        setIsPlaying(false);
+        setAnimationStartTime(null);
+        isAnimatingRef.current = false;
+        
+        // 使用 setTimeout 确保 transforms 恢复完成后再重新生成 outputScriptLines
         setTimeout(() => {
-          // 再次确保 outputScriptLines 是原始值（防止 useEffect 覆盖）
-          if (savedOutputScriptLines.length > 0) {
-            setOutputScriptLines([...savedOutputScriptLines]);
-          }
-          
-          // 标记刚刚从动画恢复，让 useEffect 跳过下一次更新
-          justRestoredFromAnimationRef.current = true;
-          
-          setIsPlaying(false);
-          setAnimationStartTime(null);
-          // 清除动画标记，允许 outputScriptLines 更新（但我们已经恢复了原始值）
-          isAnimatingRef.current = false;
-        }, 0);
+          // 使用函数式更新，确保使用最新的 transforms 值（恢复后的值）
+          setTransforms(currentTransforms => {
+            // 验证恢复后的 setTransform 是否正确
+            console.log('🔍 验证恢复后的 transforms:', currentTransforms.filter(t => t.type === 'setTransform').map(t => ({
+              target: t.target,
+              position: t.transform.position
+            })));
+            
+            // 基于恢复后的 transforms 重新生成 outputScriptLines
+            const script = exportScript(currentTransforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight, ease === "default" ? undefined : ease);
+            const lines = script.split('\n').filter(line => line.trim().length > 0);
+            setOutputScriptLines(lines);
+            console.log(`🎬 基于恢复后的 transforms 重新生成 outputScriptLines`);
+            
+            // 清空保存的原始状态（在重新生成 outputScriptLines 后再清空）
+            originalSetTransformsRef.current.clear();
+            originalOutputScriptLinesRef.current = [];
+            
+            // 再延迟一次，确保 outputScriptLines 更新完成后再允许 useEffect 正常更新
+            setTimeout(() => {
+              justRestoredFromAnimationRef.current = false;
+            }, 100);
+            
+            // 返回当前值，不修改 transforms
+            return currentTransforms;
+          });
+        }, 50);
         
         return;
       } else {
@@ -992,7 +1007,9 @@ export default function TransformEditor() {
     }
     // 如果刚刚从动画恢复，跳过这次更新，避免覆盖恢复的 outputScriptLines
     if (justRestoredFromAnimationRef.current) {
-      justRestoredFromAnimationRef.current = false;
+      // 不立即设置为 false，保持为 true 直到下一次真正需要更新
+      // 这样可以避免恢复后的多次 useEffect 触发
+      // 但在最后一次确认后，需要允许更新以确保 transforms 和 outputScriptLines 同步
       return;
     }
     if (Array.isArray(transforms)) {
@@ -1659,6 +1676,7 @@ export default function TransformEditor() {
           </div>
         )}
         <CanvasRenderer
+          animationStateRef={animationStateRef}
           canvasRef={canvasRef}
           transforms={transforms}
           setTransforms={setTransforms}

@@ -29,6 +29,7 @@ interface Props {
     enabledTargetsArray?: string[]; // 启用的target列表（数组形式，用于触发重新渲染）
     showSelectionBox?: boolean; // 是否显示蓝色框选框
     showTargetId?: boolean; // 是否显示角色ID
+    animationStateRef?: React.MutableRefObject<Map<string, any> | null>; // 动画状态 ref（用于性能优化）
 }
 
 export default function CanvasRenderer(props: Props) {
@@ -44,7 +45,8 @@ export default function CanvasRenderer(props: Props) {
         enabledTargets = new Set(),
         enabledTargetsArray = [],
         showSelectionBox = true,
-        showTargetId = true
+        showTargetId = true,
+        animationStateRef
     } = props;
 
     const appRef = useRef<PIXI.Application | null>(null);
@@ -71,7 +73,6 @@ export default function CanvasRenderer(props: Props) {
     }
 
 
-// ✅ 1️⃣ 初始化 Pixi 应用，只做一次
     useEffect(() => {
         if (!canvasRef.current) return;
 
@@ -514,6 +515,10 @@ export default function CanvasRenderer(props: Props) {
             
             container.addChild(sprite);
 
+            // 保存 baseX 和 baseY，用于动画更新时计算位置
+            (container as any)._baseX = baseX;
+            (container as any)._baseY = baseY;
+            (container as any)._isBg = isBg;
 
             const px = (transformToUse.position?.x ?? 0) * scaleX;
             const py = (transformToUse.position?.y ?? 0) * scaleY;
@@ -901,6 +906,74 @@ export default function CanvasRenderer(props: Props) {
             }
         };
     }, [guideLineType, canvasWidth, canvasHeight]);
+
+    // 独立的动画更新循环（完全不触发 React 重新渲染）
+    useEffect(() => {
+        if (!animationStateRef || !appRef.current) return;
+        
+        let animationFrameId: number;
+        
+        const updateAnimation = () => {
+            const animationState = animationStateRef.current;
+            if (!animationState) {
+                // 没有动画状态，继续循环等待
+                animationFrameId = requestAnimationFrame(updateAnimation);
+                return;
+            }
+            
+            // 遍历所有动画状态，直接更新 Pixi 对象
+            animationState.forEach((transform, target) => {
+                const container = spriteMap.current[target];
+                if (!container) return;
+                
+                const baseX = (container as any)._baseX ?? canvasWidth / 2;
+                const baseY = (container as any)._baseY ?? canvasHeight / 2;
+                const isBg = (container as any)._isBg ?? false;
+                
+                // 更新 position
+                if (transform.position) {
+                    const px = (transform.position.x ?? 0) * scaleX;
+                    const py = (transform.position.y ?? 0) * scaleY;
+                    container.x = baseX + px;
+                    container.y = baseY + py;
+                }
+                
+                // 更新 rotation
+                if (transform.rotation !== undefined) {
+                    container.rotation = transform.rotation ?? 0;
+                }
+                
+                // 更新 scale
+                if (transform.scale) {
+                    if (isBg) {
+                        container.scale.set(1, 1);
+                    } else {
+                        container.scale.set(transform.scale.x ?? 1, transform.scale.y ?? 1);
+                    }
+                }
+                
+                // 更新滤镜（如果存在）
+                for (const key in transform) {
+                    if (["position", "scale", "rotation"].includes(key)) continue;
+                    if ((container as any)[key] !== undefined) {
+                        (container as any)[key] = transform[key];
+                    }
+                }
+            });
+            
+            // 继续下一帧
+            animationFrameId = requestAnimationFrame(updateAnimation);
+        };
+        
+        // 启动动画循环
+        animationFrameId = requestAnimationFrame(updateAnimation);
+        
+        return () => {
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+        };
+    }, [animationStateRef, canvasWidth, canvasHeight, scaleX, scaleY]);
 
     return null;
 }
