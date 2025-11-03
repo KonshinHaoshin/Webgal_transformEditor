@@ -56,6 +56,37 @@ export default function TransformEditor() {
   // 是否显示角色ID
   const [showTargetId, setShowTargetId] = useState(true);
   
+  // 画幅比选择（高度固定为1440）
+  type AspectRatio = '16:9' | '21:9' | '1.85:1' | '16:10' | '4:3' | 'custom';
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9');
+  const [customWidth, setCustomWidth] = useState<number>(2560);
+  
+  // 根据画幅比和固定高度计算宽度
+  const calculateWidth = (ratio: AspectRatio, custom: number = 2560): number => {
+    const height = 1440;
+    switch (ratio) {
+      case '16:9':
+        return 2560; // 16/9 * 1440 = 2560
+      case '21:9':
+        return Math.round((21 / 9) * height); // 21:9
+      case '1.85:1':
+        return Math.round(1.85 * height); // 1.85:1
+      case '16:10':
+        return Math.round((16 / 10) * height); // 16:10
+      case '4:3':
+        return Math.round((4 / 3) * height); // 4:3
+      case 'custom':
+        return custom;
+      default:
+        return 2560;
+    }
+  };
+  
+  const canvasHeight = 1440;
+  const baseHeight = 1440;
+  const canvasWidth = calculateWidth(aspectRatio, customWidth);
+  const baseWidth = canvasWidth;
+  
   // 自适应 textarea 高度
   const adjustTextareaHeight = (el: HTMLTextAreaElement | null) => {
     if (!el) return;
@@ -84,10 +115,6 @@ export default function TransformEditor() {
   // 可编辑的 output script
   const [outputScriptLines, setOutputScriptLines] = useState<string[]>([]);
 
-  const canvasWidth = 2560;
-  const canvasHeight = 1440;
-  const baseWidth = 2560;
-  const baseHeight = 1440;
   const scaleX = canvasWidth / baseWidth;
   const scaleY = canvasHeight / baseHeight;
 
@@ -1019,6 +1046,90 @@ export default function TransformEditor() {
     >
       <h2>EASTMOUNT WEBGAL TRANSFORM EDITOR</h2>
 
+      {/* 画幅比选择 */}
+      <div style={{ 
+        marginBottom: "16px", 
+        padding: "12px", 
+        backgroundColor: "#f9f9f9", 
+        borderRadius: "6px",
+        border: "1px solid #ddd",
+        maxWidth: 780,
+        marginLeft: "auto",
+        marginRight: "auto"
+      }}>
+        <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "nowrap" }}>
+          <label style={{ 
+            fontSize: "14px", 
+            fontWeight: "600", 
+            color: "#374151",
+            whiteSpace: "nowrap"
+          }}>
+            画幅比选择：
+          </label>
+          <select
+            value={aspectRatio}
+            onChange={(e) => {
+              const ratio = e.target.value as AspectRatio;
+              setAspectRatio(ratio);
+              if (ratio !== 'custom') {
+                // 切换到预设画幅比时，自动计算宽度
+                const width = calculateWidth(ratio);
+                setCustomWidth(width);
+              }
+            }}
+            aria-label="选择画幅比"
+            title="选择画幅比"
+            style={{
+              padding: "6px 12px",
+              fontSize: "14px",
+              border: "1px solid #d1d5db",
+              borderRadius: "4px",
+              backgroundColor: "#ffffff",
+              cursor: "pointer"
+            }}
+          >
+            <option value="16:9">16:9 (2560×1440)</option>
+            <option value="21:9">21:9 (3360×1440)</option>
+            <option value="1.85:1">1.85:1 (2664×1440)</option>
+            <option value="16:10">16:10 (2304×1440)</option>
+            <option value="4:3">4:3 (1920×1440)</option>
+            <option value="custom">自定义</option>
+          </select>
+          
+          {aspectRatio === 'custom' && (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <label style={{ fontSize: "14px", color: "#374151" }}>宽度：</label>
+              <input
+                type="number"
+                value={customWidth}
+                onChange={(e) => {
+                  const width = parseInt(e.target.value) || 2560;
+                  setCustomWidth(width);
+                }}
+                min={100}
+                max={10000}
+                step={1}
+                aria-label="自定义宽度"
+                title="自定义宽度"
+                placeholder="宽度"
+                style={{
+                  padding: "4px 8px",
+                  fontSize: "14px",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "4px",
+                  width: "120px"
+                }}
+              />
+              <span style={{ fontSize: "14px", color: "#666" }}>× 1440</span>
+            </div>
+          )}
+          
+          <span style={{ fontSize: "14px", color: "#666", whiteSpace: "nowrap" }}>
+            当前画幅：{canvasWidth} × {canvasHeight}
+          </span>
+        </div>
+      </div>
+
       <p
         style={{
           backgroundColor: "#eef6ff",
@@ -1033,9 +1144,7 @@ export default function TransformEditor() {
       >
         💡 <strong>操作提示：</strong>
         <br />・Ctrl + 滚轮：缩放模型/背景 ・Alt + 拖动：旋转选中对象 ・Shift + 点击：多选对象
-        <br /> ・在开启观测层时，无法拖拽或旋转模型，但可以正常调色、使用滤镜等
-        <br /> ・在使用jsonl聚合模型的时候，请务必在jsonl文件的最后一行添加import参数或者设置相应的x和y值
-        <br /> ・在编辑<strong>Output Script</strong>的时候，直接编辑并不会立刻应用，请点击其他地方或按Enter键       
+        <br /> ・如何更改webgal的画幅比，能可以根据b站视频教程更改
         <br />・关注 B站<strong>东山燃灯寺</strong> 谢谢喵~
       </p>
 
@@ -1169,13 +1278,13 @@ export default function TransformEditor() {
             return;
           }
           
-          // 为每个 target 创建新的 setTransform（不包含 position 和 scale）
+          // 为每个 target 创建新的 setTransform
           const newItems: TransformData[] = targetsWithoutSetTransform.map((target) => {
             const newItem: TransformData = {
               type: "setTransform",
               target: target,
               duration: 0,
-              transform: {}, // 不预设 position 和 scale
+              transform: {}, 
             };
             if (target !== "bg-main") {
               (newItem as any).presetPosition = "center";

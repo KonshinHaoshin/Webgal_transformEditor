@@ -187,6 +187,16 @@
     "bevelGreen": 161,
     "bevelBlue": 161
   },
+  "背景 冷色调电源质感": {
+    "bloomBrightness": 1.1,
+    "brightness": 0.6,
+    "colorBlue": 255,
+    "colorGreen": 187,
+    "colorRed": 104,
+    "contrast": 1.1,
+    "gamma": 1.43,
+    "saturation": 0.81
+  },
   "背景 面光[清晨/黄昏（轻）]": {
     "brightness": 0.7,
     "contrast": 0.8,

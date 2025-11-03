@@ -73,23 +73,30 @@ export default function CanvasRenderer(props: Props) {
 
 // ✅ 1️⃣ 初始化 Pixi 应用，只做一次
     useEffect(() => {
-        if (!canvasRef.current || appRef.current) return;
+        if (!canvasRef.current) return;
 
-        const app = new PIXI.Application({
-            view: canvasRef.current,
-            width: canvasWidth,
-            height: canvasHeight,
-            backgroundAlpha: 0,
-            resolution: 1, // 固定分辨率，无视屏幕缩放
-            autoDensity: false, // 禁用自动密度调整，无视屏幕缩放
-        });
+        if (!appRef.current) {
+            // 首次初始化
+            const app = new PIXI.Application({
+                view: canvasRef.current,
+                width: canvasWidth,
+                height: canvasHeight,
+                backgroundAlpha: 0,
+                resolution: 1, // 固定分辨率，无视屏幕缩放
+                autoDensity: false, // 禁用自动密度调整，无视屏幕缩放
+            });
 
-        // 确保 stage 可以接收全局事件，用于拖拽
-        app.stage.interactive = true;
-        app.stage.hitArea = new PIXI.Rectangle(0, 0, canvasWidth, canvasHeight);
+            // 确保 stage 可以接收全局事件，用于拖拽
+            app.stage.interactive = true;
+            app.stage.hitArea = new PIXI.Rectangle(0, 0, canvasWidth, canvasHeight);
 
-        appRef.current = app;
-    }, []); // 👈 注意只初始化一次 Pixi
+            appRef.current = app;
+        } else {
+            // 更新画幅尺寸
+            appRef.current.renderer.resize(canvasWidth, canvasHeight);
+            appRef.current.stage.hitArea = new PIXI.Rectangle(0, 0, canvasWidth, canvasHeight);
+        }
+    }, [canvasWidth, canvasHeight]); // 👈 当画幅改变时，更新 Pixi 应用尺寸
 
 // ✅ 2️⃣ 独立 wheel 缩放事件绑定，等 canvas 真正挂载后再绑定
     useEffect(() => {
@@ -423,19 +430,34 @@ export default function CanvasRenderer(props: Props) {
             let baseY = centerY; // addFigure 的"基线 Y"
 
             if (isBg && bgImg) {
-                // 背景：铺满画布（cover），保持你原有逻辑
+                // 背景：铺满画布（cover）
+                // 使用 cover 模式：保证背景图片完全覆盖画布，可能会超出画布范围
                 const imageRatio = bgImg.width / bgImg.height;
                 const canvasRatio = canvasWidth / canvasHeight;
+                
+                // 计算铺满画布所需的缩放比例
+                // 如果画布比图片宽，按宽度铺满；如果画布比图片高，按高度铺满
                 let fitScale = canvasWidth / bgImg.width;
-                if (canvasRatio < imageRatio) fitScale = canvasHeight / bgImg.height;
+                if (canvasRatio < imageRatio) {
+                    // 画布比图片窄（高度方向），按高度铺满
+                    fitScale = canvasHeight / bgImg.height;
+                }
 
-                // drawW/drawH 只使用 fitScale，用户缩放通过 container.scale 应用
+                // drawW/drawH 使用 fitScale 计算基础尺寸
+                // 背景的基础尺寸应该保证铺满画布
                 drawW = bgImg.width * fitScale;
                 drawH = bgImg.height * fitScale;
 
                 // BG 永远居中
                 baseX = canvasWidth / 2;
                 baseY = canvasHeight / 2;
+                
+                // 背景的 scale 应该应用在铺满后的尺寸上
+                // 确保即使有用户设置的 scale，背景也能正确铺满
+                if (transformToUse.scale) {
+                    drawW *= (transformToUse.scale.x || 1);
+                    drawH *= (transformToUse.scale.y || 1);
+                }
             } else {
                 // 立绘：按 addFigure 等比适配（contain）
                 // 使用实际渲染的图片尺寸
@@ -500,7 +522,12 @@ export default function CanvasRenderer(props: Props) {
             container.y = baseY + py;
             container.rotation = transformToUse.rotation || 0;
             // ✅ 正确应用 scale 值，x 和 y 轴独立
-            container.scale.set(transformToUse.scale?.x || 1, transformToUse.scale?.y || 1);
+            // 注意：对于背景，scale 已经应用在 drawW/drawH 上，所以这里设为 1
+            if (isBg) {
+                container.scale.set(1, 1);
+            } else {
+                container.scale.set(transformToUse.scale?.x || 1, transformToUse.scale?.y || 1);
+            }
 
 
             // 💡 设置滤镜字段（由 PixiContainer 实现）
