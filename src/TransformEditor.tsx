@@ -51,6 +51,10 @@ export default function TransformEditor() {
   const [overlayMode, setOverlayMode] = useState<"none" | "color" | "luminosity">("none");
   // 启用的立绘和背景列表（Set<target>）
   const [enabledTargets, setEnabledTargets] = useState<Set<string>>(new Set());
+  // 是否显示蓝色框选框
+  const [showSelectionBox, setShowSelectionBox] = useState(true);
+  // 是否显示角色ID
+  const [showTargetId, setShowTargetId] = useState(true);
   
   // 自适应 textarea 高度
   const adjustTextareaHeight = (el: HTMLTextAreaElement | null) => {
@@ -896,6 +900,41 @@ export default function TransformEditor() {
       .catch((err) => console.error("❌ Failed to load filter presets:", err));
   }, []);
 
+  // 当 transforms 更新时，自动将所有新的 target 添加到 enabledTargets（默认全部启用）
+  useEffect(() => {
+    if (transforms.length > 0) {
+      const targets = new Set<string>();
+      transforms.forEach(t => {
+        if (t.type === 'changeFigure' || t.type === 'changeBg') {
+          targets.add(t.target);
+        }
+      });
+      
+      // 如果当前 enabledTargets 为空，或者有新的 target 出现，自动添加到 enabledTargets
+      const currentTargets = Array.from(enabledTargets);
+      const allTargets = Array.from(targets);
+      const newTargets = allTargets.filter(t => !enabledTargets.has(t));
+      
+      // 如果有新的 target 出现，自动添加；如果是第一次加载（enabledTargets 为空），全部启用
+      if (currentTargets.length === 0 || newTargets.length > 0) {
+        // 合并现有的和新出现的 target，并移除已不存在的 target
+        const validTargets = new Set<string>();
+        transforms.forEach(t => {
+          if (t.type === 'changeFigure' || t.type === 'changeBg') {
+            validTargets.add(t.target);
+          }
+        });
+        setEnabledTargets(validTargets);
+      }
+    } else {
+      // 如果 transforms 为空，清空 enabledTargets
+      if (enabledTargets.size > 0) {
+        setEnabledTargets(new Set());
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transforms]);
+
   // 同步 transforms 到 outputScript
   // 注意：动画播放时，不更新 outputScript，保持原始代码不变
   useEffect(() => {
@@ -1348,10 +1387,37 @@ export default function TransformEditor() {
           ))}
         </select>
         
+        {/* 显示选项控制 */}
+        <div style={{ marginTop: 20, display: "flex", gap: "20px", alignItems: "center", flexWrap: "wrap" }}>
+          <label style={{ display: "flex", alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={showSelectionBox}
+              onChange={(e) => setShowSelectionBox(e.target.checked)}
+              style={{ marginRight: "8px", cursor: "pointer" }}
+            />
+            <span style={{ fontWeight: "bold", color: "#333" }}>
+              显示蓝色框选框
+            </span>
+          </label>
+          
+          <label style={{ display: "flex", alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={showTargetId}
+              onChange={(e) => setShowTargetId(e.target.checked)}
+              style={{ marginRight: "8px", cursor: "pointer" }}
+            />
+            <span style={{ fontWeight: "bold", color: "#333" }}>
+              显示角色id
+            </span>
+          </label>
+        </div>
+        
         {/* 立绘和背景启用列表 */}
         <div style={{ marginTop: 20 }}>
           <label style={{ display: "block", marginBottom: 10, fontWeight: "bold", color: "#333" }}>
-            启用立绘和背景（勾选后可编辑）：
+            启用立绘和背景：
           </label>
           <div style={{ 
             display: "flex",
@@ -1484,6 +1550,8 @@ export default function TransformEditor() {
           overlayMode={overlayMode}
           enabledTargets={enabledTargets}
           enabledTargetsArray={Array.from(enabledTargets)}
+          showSelectionBox={showSelectionBox}
+          showTargetId={showTargetId}
         />
       </div>
 

@@ -27,6 +27,8 @@ interface Props {
     overlayMode?: "none" | "color" | "luminosity"; // 观察层模式
     enabledTargets?: Set<string>; // 启用的target列表
     enabledTargetsArray?: string[]; // 启用的target列表（数组形式，用于触发重新渲染）
+    showSelectionBox?: boolean; // 是否显示蓝色框选框
+    showTargetId?: boolean; // 是否显示角色ID
 }
 
 export default function CanvasRenderer(props: Props) {
@@ -40,7 +42,9 @@ export default function CanvasRenderer(props: Props) {
         guideLineType = 'none',
         overlayMode = 'none',
         enabledTargets = new Set(),
-        enabledTargetsArray = []
+        enabledTargetsArray = [],
+        showSelectionBox = true,
+        showTargetId = true
     } = props;
 
     const appRef = useRef<PIXI.Application | null>(null);
@@ -460,15 +464,17 @@ export default function CanvasRenderer(props: Props) {
                 }
             }
 
-            // 🔁 角色名
-            const nameText = new PIXI.Text(t.target, {
-                fontSize: 64,
-                fill: 0x000000,
-                fontFamily: "Arial",
-            });
-            nameText.anchor.set(0.5);
-            nameText.position.set(container.x, container.y - drawH / 2 - 10);
-            stage.addChild(nameText);
+            // 🔁 角色名（可选显示）
+            if (showTargetId) {
+                const nameText = new PIXI.Text(t.target, {
+                    fontSize: 64,
+                    fill: 0x000000,
+                    fontFamily: "Arial",
+                });
+                nameText.anchor.set(0.5);
+                nameText.position.set(container.x, container.y - drawH / 2 - 10);
+                stage.addChild(nameText);
+            }
 
             // 🧠 注册交互（只有启用的target才能交互）
             const isTargetEnabled = enabledTargets.has(t.target) || enabledTargets.size === 0;
@@ -628,8 +634,8 @@ export default function CanvasRenderer(props: Props) {
                     stage.on("pointerupoutside", handleGlobalUp);
                 });
 
-            // 📏 蓝色边框
-            if (selectedIndexes.includes(index)) {
+            // 📏 蓝色边框（可选显示）
+            if (showSelectionBox && selectedIndexes.includes(index)) {
                 const g = new PIXI.Graphics();
                 g.lineStyle(2, 0x0000ff);
                 g.drawRect(-drawW / 2, -drawH / 2, drawW, drawH);
@@ -764,7 +770,7 @@ export default function CanvasRenderer(props: Props) {
         if (existingGuideLines) {
             stage.addChild(existingGuideLines);
         }
-    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY, overlayMode, canvasWidth, canvasHeight, enabledTargets, enabledTargetsArray]);
+    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY, overlayMode, canvasWidth, canvasHeight, enabledTargets, enabledTargetsArray, showSelectionBox, showTargetId]);
 
     // 独立的辅助线渲染逻辑
     useEffect(() => {

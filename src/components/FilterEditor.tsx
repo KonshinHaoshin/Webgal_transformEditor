@@ -330,9 +330,9 @@ export default function FilterEditor({
         return { ...t, transform: nextTransform };
       })
     );
-
-    const displayName = isUserPreset ? actualPresetName : presetName;
-    alert(`预设 "${displayName}" 加载成功！`);
+    // 感觉不是很有必要弹窗
+    // const displayName = isUserPreset ? actualPresetName : presetName;
+    // alert(`预设 "${displayName}" 加载成功！`);
   };
 
   // 删除用户预设
@@ -451,7 +451,7 @@ export default function FilterEditor({
             marginBottom: "4px",
             color: "#374151"
           }}>
-            选择预设：
+            选择滤镜预设：
           </label>
           <select
             value={selectedPreset}
