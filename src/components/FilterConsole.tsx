@@ -88,7 +88,6 @@ export default function FilterConsole({
       </div>
 
       <div className="filter-console-body">
-        {/* 在这里放你的控制项；演示：brightness 一个滑条 */}
         <div className="filter-control">
           <label>Brightness</label>
           <input
@@ -98,14 +97,11 @@ export default function FilterConsole({
             step={0.01}
             onChange={(e) => {
               const v = parseFloat(e.target.value);
-              // 对所有选中的对象生效；若无选中，可自行改为对全部对象生效
               selectedIndexes.forEach(idx => onFilterChange(idx, "brightness", v));
             }}
           />
         </div>
 
-        {/* 继续添加其它控制项：contrast/saturation/gamma/... */}
-        {/* 你也可以把之前的 FilterEditor 的网格控件搬过来复用 */}
       </div>
     </div>
   );

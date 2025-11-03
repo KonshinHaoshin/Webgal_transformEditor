@@ -282,8 +282,28 @@ export default function CanvasRenderer(props: Props) {
             if (t.type === "changeFigure" || t.type === "changeBg") {
                 const setTransform = setTransformMap.get(t.target);
                 if (setTransform) {
-                    // 使用 setTransform 的 transform，而不是 changeFigure/changeBg 的 transform
-                    transformToUse = setTransform.transform;
+                    // 合并 setTransform 和 changeFigure/changeBg 的 transform
+                    // 使用 setTransform 的 position, scale, rotation
+                    // 但如果 setTransform 中缺少滤镜参数，从 changeFigure/changeBg 中继承
+                    const filterKeys = [
+                        "brightness", "contrast", "saturation", "gamma",
+                        "colorRed", "colorGreen", "colorBlue",
+                        "bloom", "bloomBrightness", "bloomBlur", "bloomThreshold",
+                        "bevel", "bevelThickness", "bevelRotation", "bevelSoftness",
+                        "bevelRed", "bevelGreen", "bevelBlue"
+                    ];
+                    
+                    transformToUse = {
+                        ...t.transform, // 先使用 changeFigure/changeBg 的 transform（包含滤镜参数）
+                        ...setTransform.transform, // 然后用 setTransform 的 transform 覆盖（position, scale, rotation）
+                    };
+                    
+                    // 确保滤镜参数不会被 setTransform 覆盖（如果 setTransform 中没有定义这些参数）
+                    for (const key of filterKeys) {
+                        if (setTransform.transform[key] === undefined && t.transform[key] !== undefined) {
+                            transformToUse[key] = t.transform[key];
+                        }
+                    }
                 }
             }
             
