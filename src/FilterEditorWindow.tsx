@@ -61,8 +61,6 @@ export default function FilterEditorWindow() {
       emit('filter-editor:transforms-changed', {
         transforms: transforms
       }).catch(() => {
-        // 静默失败，避免控制台噪音（窗口可能还未完全初始化）
-        // 不打印错误，因为主窗口可能还没有准备好接收事件
       });
     }
   }, [transforms]);

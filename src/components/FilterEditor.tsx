@@ -95,7 +95,15 @@ export default function FilterEditor({
   const [selectedPreset, setSelectedPreset] = useState<string>("");
   
   // 位置预设相关状态
-  const [positionPresets, setPositionPresets] = useState<Record<string, any>>({});
+  const [builtinPositionPresets, setBuiltinPositionPresets] = useState<Record<string, any>>({});
+  const [userPositionPresets, setUserPositionPresets] = useState<Record<string, any>>({});
+  const [showPositionPresetModal, setShowPositionPresetModal] = useState(false);
+  const [newPositionPresetName, setNewPositionPresetName] = useState("");
+  
+  // 合并内置预设和用户自定义预设
+  const positionPresets = useMemo(() => {
+    return { ...builtinPositionPresets, ...userPositionPresets };
+  }, [builtinPositionPresets, userPositionPresets]);
 
   // 获取所有可用的target ID列表（用于勾选）
   const availableTargetIds = useMemo(() => {
@@ -179,14 +187,14 @@ export default function FilterEditor({
       .then((data) => setAllPresets(data))
       .catch((err) => console.error("❌ Failed to load filter presets:", err));
     
-    // 加载位置预设
+    // 加载内置位置预设
     fetch("/position-presets.json")
       .then((res) => res.json())
-      .then((data) => setPositionPresets(data))
+      .then((data) => setBuiltinPositionPresets(data))
       .catch((err) => console.error("❌ Failed to load position presets:", err));
   }, []);
 
-  // 加载用户自定义预设
+  // 加载用户自定义预设（滤镜）
   useEffect(() => {
     const savedUserPresets = localStorage.getItem("userFilterPresets");
     if (savedUserPresets) {
@@ -198,9 +206,26 @@ export default function FilterEditor({
     }
   }, []);
 
+  // 加载用户自定义位置预设
+  useEffect(() => {
+    const savedUserPositionPresets = localStorage.getItem("userPositionPresets");
+    if (savedUserPositionPresets) {
+      try {
+        setUserPositionPresets(JSON.parse(savedUserPositionPresets));
+      } catch (e) {
+        console.error("Failed to parse saved user position presets:", e);
+      }
+    }
+  }, []);
+
   // 保存用户预设到 localStorage
   const saveUserPresetsToStorage = (newUserPresets: FilterPreset[]) => {
     localStorage.setItem("userFilterPresets", JSON.stringify(newUserPresets));
+  };
+
+  // 保存用户位置预设到 localStorage
+  const saveUserPositionPresetsToStorage = (newUserPositionPresets: Record<string, any>) => {
+    localStorage.setItem("userPositionPresets", JSON.stringify(newUserPositionPresets));
   };
 
   // 获取所有预设（内置 + 用户自定义）
@@ -398,6 +423,24 @@ export default function FilterEditor({
     setUserPresets(updatedUserPresets);
     saveUserPresetsToStorage(updatedUserPresets);
     alert(`预设 "${presetName}" 已删除！`);
+  };
+
+  // 删除位置预设（只能删除用户自定义预设）
+  const deletePositionPreset = (presetName: string) => {
+    // 检查是否为内置预设
+    if (builtinPositionPresets[presetName]) {
+      alert("无法删除内置位置预设！");
+      return;
+    }
+    
+    if (!confirm(`确定要删除位置预设 "${presetName}" 吗？`)) return;
+
+    const updatedUserPresets = { ...userPositionPresets };
+    delete updatedUserPresets[presetName];
+    setUserPositionPresets(updatedUserPresets);
+    saveUserPositionPresetsToStorage(updatedUserPresets);
+    
+    alert(`位置预设 "${presetName}" 已删除！`);
   };
 
   return (
@@ -714,7 +757,287 @@ export default function FilterEditor({
               </option>
             ))}
           </select>
+          <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+            <button
+              onClick={() => {
+                // 获取当前选中项的 position 和 scale
+                const targetIndex = selectedIndexes.length > 0 ? selectedIndexes[selectedIndexes.length - 1] : -1;
+                if (targetIndex === -1) {
+                  alert("请先选择一个 transform 项目！");
+                  return;
+                }
+                
+                const targetTransform = transforms[targetIndex];
+                if (!targetTransform) {
+                  alert("未找到选中的 transform！");
+                  return;
+                }
+                
+                // 提取 position 和 scale
+                const position = targetTransform.transform.position;
+                const scale = targetTransform.transform.scale;
+                
+                // 检查是否有 position 或 scale
+                if (!position && !scale) {
+                  alert("选中的 transform 没有 position 或 scale 信息！");
+                  return;
+                }
+                
+                // 打开保存预设的模态框
+                setShowPositionPresetModal(true);
+              }}
+              style={{
+                padding: "6px 12px",
+                background: "#3b82f6",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "12px",
+                flex: 1
+              }}
+            >
+              保存当前位置为预设
+            </button>
+          </div>
+          
+          {/* 位置预设列表 */}
+          {Object.keys(positionPresets).length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "8px" }}>
+                位置预设列表：
+              </div>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                {Object.keys(positionPresets).map((presetName) => {
+                  const isUserPreset = userPositionPresets[presetName];
+                  return (
+                    <div key={presetName} style={{
+                      padding: "6px 10px",
+                      background: "white",
+                      border: "1px solid #d1d5db",
+                      borderRadius: "4px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      fontSize: "11px"
+                    }}>
+                      <span style={{ fontWeight: "500" }}>{presetName}</span>
+                      {isUserPreset && (
+                        <button
+                          onClick={() => deletePositionPreset(presetName)}
+                          style={{
+                            padding: "2px 4px",
+                            background: "#ef4444",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "3px",
+                            cursor: "pointer",
+                            fontSize: "9px"
+                          }}
+                        >
+                          删除
+                        </button>
+                      )}
+                      {!isUserPreset && (
+                        <span style={{ color: "#9ca3af", fontSize: "9px" }}>内置</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
+
+        {/* 保存位置预设的模态框 */}
+        {showPositionPresetModal && (
+          <div style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 10000
+          }}>
+            <div style={{
+              background: "white",
+              padding: "24px",
+              borderRadius: "8px",
+              minWidth: "400px",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)"
+            }}>
+              <h3 style={{ margin: "0 0 16px 0", color: "#374151" }}>保存位置预设</h3>
+              
+              <div style={{ marginBottom: "16px" }}>
+                <label style={{ display: "block", marginBottom: "4px", fontSize: "14px", color: "#374151" }}>
+                  预设名称 *
+                </label>
+                <input
+                  type="text"
+                  value={newPositionPresetName}
+                  onChange={(e) => setNewPositionPresetName(e.target.value)}
+                  placeholder="输入预设名称"
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    border: "1px solid #d1d5db",
+                    borderRadius: "4px",
+                    fontSize: "14px"
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const targetIndex = selectedIndexes.length > 0 ? selectedIndexes[selectedIndexes.length - 1] : -1;
+                      if (targetIndex === -1) return;
+                      
+                      const targetTransform = transforms[targetIndex];
+                      if (!targetTransform) return;
+                      
+                      const position = targetTransform.transform.position;
+                      const scale = targetTransform.transform.scale;
+                      
+                      // 构建预设数据（只包含 position 的 y 字段和 scale 的所有字段，格式与 position-presets.json 一致）
+                      const presetData: any = {};
+                      
+                      // 只保存 position 的 y 字段（不保存 x 字段）
+                      if (position && position.y !== undefined && position.y !== null) {
+                        presetData.position = {
+                          y: position.y
+                        };
+                      }
+                      
+                      // 保存 scale 的所有字段（x 和 y，如果存在且不是 null/undefined）
+                      if (scale) {
+                        presetData.scale = {};
+                        if (scale.x !== undefined && scale.x !== null) {
+                          presetData.scale.x = scale.x;
+                        }
+                        if (scale.y !== undefined && scale.y !== null) {
+                          presetData.scale.y = scale.y;
+                        }
+                        // 如果 scale 对象为空，则不添加
+                        if (Object.keys(presetData.scale).length === 0) {
+                          delete presetData.scale;
+                        }
+                      }
+                      
+                      // 更新用户位置预设
+                      const updatedUserPresets = {
+                        ...userPositionPresets,
+                        [newPositionPresetName.trim()]: presetData
+                      };
+                      setUserPositionPresets(updatedUserPresets);
+                      saveUserPositionPresetsToStorage(updatedUserPresets);
+                      
+                      setShowPositionPresetModal(false);
+                      setNewPositionPresetName("");
+                      alert(`位置预设 "${newPositionPresetName.trim()}" 保存成功！`);
+                    }
+                  }}
+                />
+              </div>
+              
+              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+                <button
+                  onClick={() => {
+                    setShowPositionPresetModal(false);
+                    setNewPositionPresetName("");
+                  }}
+                  style={{
+                    padding: "8px 16px",
+                    background: "#e5e7eb",
+                    color: "#374151",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "14px"
+                  }}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => {
+                    if (!newPositionPresetName.trim()) {
+                      alert("请输入预设名称！");
+                      return;
+                    }
+                    
+                    // 获取当前选中项的 position 和 scale
+                    const targetIndex = selectedIndexes.length > 0 ? selectedIndexes[selectedIndexes.length - 1] : -1;
+                    if (targetIndex === -1) {
+                      alert("请先选择一个 transform 项目！");
+                      return;
+                    }
+                    
+                    const targetTransform = transforms[targetIndex];
+                    if (!targetTransform) {
+                      alert("未找到选中的 transform！");
+                      return;
+                    }
+                    
+                    const position = targetTransform.transform.position;
+                    const scale = targetTransform.transform.scale;
+                    
+                    // 检查是否已存在同名预设（仅检查用户自定义预设，用户可以覆盖自己的预设）
+                    if (userPositionPresets[newPositionPresetName.trim()]) {
+                      if (!confirm(`位置预设 "${newPositionPresetName.trim()}" 已存在，是否覆盖？`)) {
+                        return;
+                      }
+                    }
+                    
+                    const presetData: any = {};
+                    
+                    if (position && position.y !== undefined && position.y !== null) {
+                      presetData.position = {
+                        y: position.y
+                      };
+                    }
+                    
+                    if (scale) {
+                      presetData.scale = {};
+                      if (scale.x !== undefined && scale.x !== null) {
+                        presetData.scale.x = scale.x;
+                      }
+                      if (scale.y !== undefined && scale.y !== null) {
+                        presetData.scale.y = scale.y;
+                      }
+                      // 如果 scale 对象为空，则不添加
+                      if (Object.keys(presetData.scale).length === 0) {
+                        delete presetData.scale;
+                      }
+                    }
+                    
+                    // 更新用户位置预设
+                    const updatedUserPresets = {
+                      ...userPositionPresets,
+                      [newPositionPresetName.trim()]: presetData
+                    };
+                    setUserPositionPresets(updatedUserPresets);
+                    saveUserPositionPresetsToStorage(updatedUserPresets);
+                    
+                    setShowPositionPresetModal(false);
+                    setNewPositionPresetName("");
+                    alert(`位置预设 "${newPositionPresetName.trim()}" 保存成功！`);
+                  }}
+                  style={{
+                    padding: "8px 16px",
+                    background: "#3b82f6",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "14px"
+                  }}
+                >
+                  保存
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 用户预设列表 */}
         {userPresets.length > 0 && (

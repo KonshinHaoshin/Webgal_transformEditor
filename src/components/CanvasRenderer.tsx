@@ -739,7 +739,6 @@ export default function CanvasRenderer(props: Props) {
         });
         
         // 🎨 观察层：保持原始对象在stage上，在它们之上添加观察层
-        // 这样即使有观察层，原始对象仍然可以接收鼠标事件
         if (overlayMode !== "none") {
             // 移除旧的观察层
             if (overlayRef.current) {
@@ -875,9 +874,6 @@ export default function CanvasRenderer(props: Props) {
         graphics.lineStyle(3, 0xff0000, 1.0); // 红色粗线条，更显眼
 
         switch (guideLineType) {
-            case 'grid-3x3':
-                drawGuideLines(graphics, 'grid-3x3', canvasWidth, canvasHeight);
-                break;
             case 'rule-of-thirds':
                 drawGuideLines(graphics, 'rule-of-thirds', canvasWidth, canvasHeight);
                 break;
@@ -907,7 +903,7 @@ export default function CanvasRenderer(props: Props) {
         };
     }, [guideLineType, canvasWidth, canvasHeight]);
 
-    // 独立的动画更新循环（完全不触发 React 重新渲染）
+    // 独立的动画更新循环
     useEffect(() => {
         if (!animationStateRef || !appRef.current) return;
         
@@ -981,7 +977,6 @@ export default function CanvasRenderer(props: Props) {
 // 辅助线绘制函数
 function drawGuideLines(graphics: PIXI.Graphics, type: string, width: number, height: number) {
     switch (type) {
-        case 'grid-3x3':
         case 'rule-of-thirds':
             const thirdWidth = width / 3;
             const thirdHeight = height / 3;
