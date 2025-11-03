@@ -323,7 +323,7 @@ export default function FilterEditor({
     // 应用预设到面板
     setValues(preset);
     
-    // 应用预设到 transforms
+    // 应用预设到 transforms - 彻底完全替换滤镜参数
     setTransforms(prev =>
       prev.map((t) => {
         // 只对勾选的target ID生效
@@ -331,8 +331,35 @@ export default function FilterEditor({
         
         if (!shouldApply) return t;
 
-        // 确保所有预设参数都被写入 transform 对象
-        const nextTransform = { ...t.transform, ...preset };
+        // 滤镜参数列表
+        const filterKeys = [
+          "brightness", "contrast", "saturation", "gamma",
+          "colorRed", "colorGreen", "colorBlue",
+          "bloom", "bloomBrightness", "bloomBlur", "bloomThreshold",
+          "bevel", "bevelThickness", "bevelRotation", "bevelSoftness",
+          "bevelRed", "bevelGreen", "bevelBlue"
+        ];
+
+        // 彻底完全替换：只保留非滤镜属性（position, scale, rotation），完全替换所有滤镜参数
+        const nextTransform: any = {
+          // 保留基础属性
+          position: t.transform.position || { x: 0, y: 0 },
+          scale: t.transform.scale || { x: 1, y: 1 },
+          rotation: t.transform.rotation !== undefined ? t.transform.rotation : 0,
+        };
+
+        // 完全替换所有滤镜参数（使用预设值或默认值）
+        for (const key of filterKeys) {
+          const filterKey = key as FilterKey;
+          if (preset[filterKey] !== undefined) {
+            // 使用预设值
+            nextTransform[key] = preset[filterKey];
+          } else {
+            // 如果预设中没有定义，使用默认值
+            nextTransform[key] = DEFAULTS[filterKey];
+          }
+        }
+
         return { ...t, transform: nextTransform };
       })
     );

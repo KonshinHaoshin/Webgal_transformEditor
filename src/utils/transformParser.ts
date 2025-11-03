@@ -46,6 +46,14 @@ export function exportScript(
     const scaleRatioX = baseWidth / canvasWidth;
     const scaleRatioY = baseHeight / canvasHeight;
 
+    // 构建 target 到 changeFigure/changeBg 的映射，用于 setTransform 继承滤镜参数
+    const baseTransforms = new Map<string, TransformData>();
+    for (const t of transforms) {
+        if ((t.type === "changeFigure" || t.type === "changeBg") && t.target) {
+            baseTransforms.set(t.target, t);
+        }
+    }
+
     return transforms.map(obj => {
         // 如果是原始文本类型，直接返回原始文本
         if (obj.type === "rawText" && obj.rawText) {
@@ -53,7 +61,7 @@ export function exportScript(
         }
 
         // 构建导出用的 transform 对象，确保保留所有属性（包括滤镜参数）
-        const transform = {
+        let transform: any = {
             ...obj.transform,
             position: {
                 x: obj.transform.position.x * scaleRatioX,
@@ -61,9 +69,30 @@ export function exportScript(
             },
             // 确保 scale 值不被修改，保持原始的 x 和 y 值
             scale: obj.transform.scale || { x: 1, y: 1 }
-            // 其他所有属性（brightness, contrast, saturation, gamma, colorRed, colorGreen, colorBlue 等）
-            // 都通过 ...obj.transform 被保留
         };
+
+        // 对于 setTransform，如果缺少滤镜参数，从对应的 changeFigure/changeBg 继承
+        if (obj.type === "setTransform" && obj.target) {
+            const baseTransform = baseTransforms.get(obj.target);
+            if (baseTransform) {
+                // 滤镜参数列表
+                const filterKeys = [
+                    "brightness", "contrast", "saturation", "gamma",
+                    "colorRed", "colorGreen", "colorBlue",
+                    "bloom", "bloomBrightness", "bloomBlur", "bloomThreshold",
+                    "bevel", "bevelThickness", "bevelRotation", "bevelSoftness",
+                    "bevelRed", "bevelGreen", "bevelBlue"
+                ];
+                
+                // 如果 setTransform 的 transform 中缺少某个滤镜参数，从 baseTransform 继承
+                for (const key of filterKeys) {
+                    if (transform[key] === undefined && baseTransform.transform[key] !== undefined) {
+                        transform[key] = baseTransform.transform[key];
+                    }
+                }
+            }
+        }
+
         const roundedTransform = roundTransform(transform);
         const transformJson = JSON.stringify(roundedTransform);
 
