@@ -16,7 +16,6 @@ export default function TransformEditor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [input, setInput] = useState("");
   const [transforms, setTransforms] = useState<TransformData[]>([]);
-  const [dragging] = useState<number | null>(null);
   const [modelImg, setModelImg] = useState<HTMLImageElement | null>(null);
   const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
   
@@ -826,8 +825,6 @@ export default function TransformEditor() {
       canvas.removeEventListener("mouseleave", handleLeave);
     };
   }, [canvasRef.current, canvasWidth, canvasHeight]);
-
-  useEffect(() => {}, [transforms, dragging, modelImg]);
 
   // 动画循环
   useEffect(() => {
