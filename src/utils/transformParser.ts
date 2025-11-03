@@ -69,12 +69,17 @@ export function exportScript(
 
         if (obj.type === "setTransform") {
             // 只有当 obj.ease 有值且不是空字符串时才添加 ease 参数
+            // 如果 obj.ease 是 undefined，表示原始值没有 ease 参数，不使用 defaultEase
+            // 如果 obj.ease 是空字符串，表示应该使用 defaultEase（如果有的话）
             let easeParam = "";
-            if (obj.ease && obj.ease !== "") {
+            if (obj.ease !== undefined && obj.ease !== "") {
+                // obj.ease 有值且不是空字符串，使用它
                 easeParam = ` -ease=${obj.ease}`;
-            } else if (defaultEase && defaultEase !== "default") {
+            } else if (obj.ease === "" && defaultEase && defaultEase !== "default") {
+                // obj.ease 是空字符串，且 defaultEase 存在，使用 defaultEase
                 easeParam = ` -ease=${defaultEase}`;
             }
+            // 如果 obj.ease 是 undefined，不使用 ease 参数（保持原始状态）
             return `setTransform:${transformJson} -target=${obj.target} -duration=${exportDuration}${easeParam} -next;`;
         }
 
@@ -176,8 +181,17 @@ export function buildAnimationSequence(transforms: TransformData[]): Array<{
         
         // 处理每个 setTransform
         for (const setTransform of anim.setTransforms) {
-            // 计算结束状态：合并当前状态和 setTransform
-            const endState = mergeTransform(currentState, setTransform.transform);
+            // 结束状态：直接使用 setTransform 的 transform（已经是绝对位置）
+            // 不需要合并，因为 setTransform 的 transform 已经是最终状态
+            const endState = JSON.parse(JSON.stringify(setTransform.transform));
+            
+            // 确保 endState 有所有必需的属性
+            if (!endState.position) {
+                endState.position = currentState.position || { x: 0, y: 0 };
+            }
+            if (!endState.scale) {
+                endState.scale = currentState.scale || { x: 1, y: 1 };
+            }
             
             const duration = setTransform.duration || 500;
             const ease = setTransform.ease || 'easeInOut';
@@ -193,7 +207,7 @@ export function buildAnimationSequence(transforms: TransformData[]): Array<{
                 endTime: currentTime + duration
             });
             
-            // 更新当前状态为结束状态
+            // 更新当前状态为结束状态（用于下一个 setTransform 的起始状态）
             currentState = endState;
             currentTime += duration;
         }
@@ -231,13 +245,14 @@ function mergeTransform(base: any, update: any): any {
  * 应用 figureID 系统
  * 相同 figureID 的多个命令会被合并，只显示最终状态
  * 保持 rawText 和 changeBg 的原始顺序
+ * 注意：setTransform 不会被合并到 changeFigure，而是保留为独立命令（用于渲染时的状态计算）
  */
 export function applyFigureIDSystem(transforms: TransformData[]): TransformData[] {
-    // Map<figureID, TransformData> - 存储每个 figure 的最终状态
+    // Map<figureID, TransformData> - 存储每个 figure 的最终状态（用于渲染）
     const figureStates = new Map<string, TransformData>();
     const result: TransformData[] = [];
     
-    // 第一次遍历：处理所有 figure 相关的命令，计算最终状态
+    // 第一次遍历：处理所有 figure 相关的命令，计算最终状态（用于渲染）
     for (const transform of transforms) {
         // rawText 和 changeBg 跳过，后面再处理
         if (transform.type === 'rawText' || transform.type === 'changeBg') {
@@ -254,7 +269,7 @@ export function applyFigureIDSystem(transforms: TransformData[]): TransformData[
             // changeFigure：设置/更新该 figure 的状态（完全替换）
             figureStates.set(figureID, { ...transform });
         } else if (transform.type === 'setTransform') {
-            // setTransform：合并该 figure 的 transform
+            // setTransform：合并该 figure 的 transform（用于渲染时的状态计算）
             const existingState = figureStates.get(figureID);
             if (existingState) {
                 // 合并 transform（深度合并 position 和 scale，其他属性替换）
@@ -281,33 +296,37 @@ export function applyFigureIDSystem(transforms: TransformData[]): TransformData[
         }
     }
     
-    // 第二次遍历：保持原始顺序，插入最终的 figure 状态
-    // 记录哪些 figureID 已经被添加到结果中
-    const addedFigures = new Set<string>();
-    
+    // 第二次遍历：保持原始顺序，插入所有命令
+    // changeFigure 保持原始状态（不合并 setTransform），setTransform 保留为独立命令
     for (const transform of transforms) {
         if (transform.type === 'rawText' || transform.type === 'changeBg') {
             // rawText 和 changeBg 保持原位置
             result.push(transform);
+        } else if (transform.type === 'setTransform') {
+            // setTransform：保留为独立命令，不合并
+            result.push(transform);
         } else {
+            // changeFigure：保持原始状态，不合并 setTransform 的 transform
             const figureID = transform.target;
             if (figureID && figureID !== 'bg-main') {
-                // 只有在第一次遇到该 figureID 时才添加最终状态
-                if (!addedFigures.has(figureID)) {
-                    const finalState = figureStates.get(figureID);
-                    if (finalState) {
-                        result.push(finalState);
-                        addedFigures.add(figureID);
-                    }
+                // 检查是否已经添加过该 figureID 的 changeFigure
+                const alreadyAdded = result.some(
+                    (t) => t.type === 'changeFigure' && t.target === figureID
+                );
+                if (!alreadyAdded) {
+                    // 保持原始 changeFigure 状态，不合并 setTransform
+                    result.push(transform);
                 }
-                // 后续相同 figureID 的命令被忽略（已合并）
             }
         }
     }
     
     // 添加那些在原始序列中从未出现过的 figure（不应该发生，但保险起见）
     figureStates.forEach((state, figureID) => {
-        if (!addedFigures.has(figureID)) {
+        const alreadyAdded = result.some(
+            (t) => t.type === 'changeFigure' && t.target === figureID
+        );
+        if (!alreadyAdded) {
             result.push(state);
         }
     });

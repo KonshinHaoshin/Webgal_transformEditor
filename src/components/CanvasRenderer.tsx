@@ -204,14 +204,37 @@ export default function CanvasRenderer(props: Props) {
         graphicsMapRef.current = {};
         spriteMap.current = {};
 
+        // 构建 target 到 setTransform 的映射（使用最后一个 setTransform）
+        const setTransformMap = new Map<string, TransformData>();
+        transforms.forEach((t) => {
+            if (t.type === "setTransform" && t.target) {
+                setTransformMap.set(t.target, t);
+            }
+        });
+
         transforms.forEach((t, index) => {
             // 跳过 rawText 类型，不渲染任何内容
             if (t.type === "rawText") {
                 return;
             }
             
+            // 跳过 setTransform 类型，它们不应该单独渲染（只用于状态计算和导出）
+            if (t.type === "setTransform") {
+                return;
+            }
+            
             const container = new PixiContainer();
             const isBg = t.target === "bg-main";
+            
+            // 对于非背景的立绘，查找对应的 setTransform（如果有的话）
+            let transformToUse = t.transform;
+            if (!isBg && t.type === "changeFigure") {
+                const setTransform = setTransformMap.get(t.target);
+                if (setTransform) {
+                    // 使用 setTransform 的 transform，而不是 changeFigure 的 transform
+                    transformToUse = setTransform.transform;
+                }
+            }
             
             // 获取立绘或背景
             let displayObject: PIXI.DisplayObject | null = null;
@@ -372,21 +395,21 @@ export default function CanvasRenderer(props: Props) {
             container.addChild(sprite);
 
 
-            const px = (t.transform.position?.x ?? 0) * scaleX;
-            const py = (t.transform.position?.y ?? 0) * scaleY;
+            const px = (transformToUse.position?.x ?? 0) * scaleX;
+            const py = (transformToUse.position?.y ?? 0) * scaleY;
 
             container.x = baseX + px;
             container.y = baseY + py;
-            container.rotation = t.transform.rotation || 0;
+            container.rotation = transformToUse.rotation || 0;
             // ✅ 正确应用 scale 值，x 和 y 轴独立
-            container.scale.set(t.transform.scale?.x || 1, t.transform.scale?.y || 1);
+            container.scale.set(transformToUse.scale?.x || 1, transformToUse.scale?.y || 1);
 
 
             // 💡 设置滤镜字段（由 PixiContainer 实现）
-            for (const key in t.transform) {
+            for (const key in transformToUse) {
                 if (["position", "scale", "rotation"].includes(key)) continue;
                 if ((container as any)[key] !== undefined) {
-                    (container as any)[key] = t.transform[key];
+                    (container as any)[key] = transformToUse[key];
                 }
             }
 
@@ -411,23 +434,34 @@ export default function CanvasRenderer(props: Props) {
                     offsetRef.current = { x: local.x, y: local.y };
                     draggingRef.current = index;
 
-                    // 保存初始位置
+                    // 保存初始位置（使用 setTransform 的 transform，如果有的话）
                     initialPositionsRef.current = {};
                     selectedIndexes.forEach(idx => {
+                        const targetTransform = transforms[idx];
+                        // 查找对应的 setTransform
+                        const setTransform = transforms.find(
+                            (tr) => tr.type === "setTransform" && tr.target === targetTransform.target
+                        );
+                        const transformToUse = setTransform ? setTransform.transform : targetTransform.transform;
                         initialPositionsRef.current[idx] = {
-                            x: transforms[idx].transform.position.x,
-                            y: transforms[idx].transform.position.y,
+                            x: transformToUse.position?.x ?? 0,
+                            y: transformToUse.position?.y ?? 0,
                         };
                     });
 
                     const cx = container.x;
                     const cy = container.y;
 
+                    // 获取当前渲染时使用的 transform（用于旋转控制）
+                    const setTransformForCurrent = setTransformMap.get(t.target);
+                    const currentTransform = setTransformForCurrent ? setTransformForCurrent.transform : transformToUse;
+
                     if (isAlt) {
                         // 🌀 旋转控制
                         rotatingRef.current = true;
                         rotationStartAngleRef.current = Math.atan2(local.y - cy, local.x - cx);
-                        initialRotationRef.current = t.transform.rotation || 0;
+                        // 使用当前渲染时使用的 transform
+                        initialRotationRef.current = currentTransform.rotation || 0;
                     } else {
                         // ✅ 多选或单选（只在未选中时更新选中状态）
                         if (isShift) {
@@ -448,16 +482,38 @@ export default function CanvasRenderer(props: Props) {
                         const localPos = e.data.getLocalPosition(app.stage);
                         if (rotatingRef.current) {
                             // 🌀 实时旋转
-                            const cx = centerX + transforms[i].transform.position.x * scaleX;
-                            const cy = centerY + transforms[i].transform.position.y * scaleY;
-                            const angleNow = Math.atan2(localPos.y - cy, localPos.x - cx);
-                            const delta = angleNow - rotationStartAngleRef.current;
+                            const currentTransform = transforms[i];
+                            // 查找对应的 setTransform（如果有）
+                            const setTransformIdx = transforms.findIndex(
+                                (tr) => tr.type === "setTransform" && tr.target === currentTransform.target
+                            );
+                            
+                            if (setTransformIdx !== -1) {
+                                // 更新 setTransform 的 rotation
+                                setTransforms((prev) => {
+                                    const copy = [...prev];
+                                    // 使用 setTransform 的 transform 来计算位置（用于旋转中心）
+                                    const setTransform = copy[setTransformIdx];
+                                    const cx = centerX + (setTransform.transform.position?.x ?? 0) * scaleX;
+                                    const cy = centerY + (setTransform.transform.position?.y ?? 0) * scaleY;
+                                    const angleNow = Math.atan2(localPos.y - cy, localPos.x - cx);
+                                    const delta = angleNow - rotationStartAngleRef.current;
+                                    copy[setTransformIdx].transform.rotation = initialRotationRef.current + delta;
+                                    return copy;
+                                });
+                            } else {
+                                // 如果没有 setTransform，使用原来的逻辑（不应该发生，但保险起见）
+                                const cx = centerX + transforms[i].transform.position.x * scaleX;
+                                const cy = centerY + transforms[i].transform.position.y * scaleY;
+                                const angleNow = Math.atan2(localPos.y - cy, localPos.x - cx);
+                                const delta = angleNow - rotationStartAngleRef.current;
 
-                            setTransforms((prev) => {
-                                const copy = [...prev];
-                                copy[i].transform.rotation = initialRotationRef.current + delta;
-                                return copy;
-                            });
+                                setTransforms((prev) => {
+                                    const copy = [...prev];
+                                    copy[i].transform.rotation = initialRotationRef.current + delta;
+                                    return copy;
+                                });
+                            }
                         } else {
                             const deltaX = localPos.x - offsetRef.current.x;
                             const deltaY = localPos.y - offsetRef.current.y;
@@ -467,12 +523,28 @@ export default function CanvasRenderer(props: Props) {
                                 selectedIndexes.forEach((idx) => {
                                     const initialPos = initialPositionsRef.current[idx];
                                     if (initialPos) {
-                                        // 应用Lock X和Lock Y逻辑
-                                        if (!lockX) {
-                                            copy[idx].transform.position.x = initialPos.x + deltaX / scaleX;
-                                        }
-                                        if (!lockY) {
-                                            copy[idx].transform.position.y = initialPos.y + deltaY / scaleY;
+                                        const targetTransform = prev[idx];
+                                        // 查找对应的 setTransform（如果有）
+                                        const setTransformIdx = copy.findIndex(
+                                            (tr) => tr.type === "setTransform" && tr.target === targetTransform.target
+                                        );
+                                        
+                                        if (setTransformIdx !== -1) {
+                                            // 更新 setTransform 的 position
+                                            if (!lockX) {
+                                                copy[setTransformIdx].transform.position.x = initialPos.x + deltaX / scaleX;
+                                            }
+                                            if (!lockY) {
+                                                copy[setTransformIdx].transform.position.y = initialPos.y + deltaY / scaleY;
+                                            }
+                                        } else {
+                                            // 如果没有 setTransform，使用原来的逻辑（不应该发生，但保险起见）
+                                            if (!lockX) {
+                                                copy[idx].transform.position.x = initialPos.x + deltaX / scaleX;
+                                            }
+                                            if (!lockY) {
+                                                copy[idx].transform.position.y = initialPos.y + deltaY / scaleY;
+                                            }
                                         }
                                     }
                                 });

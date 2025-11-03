@@ -47,6 +47,14 @@ export default function TransformEditor() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [animationStartTime, setAnimationStartTime] = useState<number | null>(null);
   const [animationData, setAnimationData] = useState<any[]>([]);
+  // 保存原始的 setTransform 状态（用于动画结束后恢复）
+  const originalSetTransformsRef = useRef<Map<string, TransformData>>(new Map());
+  // 保存原始的 outputScriptLines 字符串（用于避免精度损失）
+  const originalOutputScriptLinesRef = useRef<string[]>([]);
+  // 标记是否正在播放动画（用于防止 outputScriptLines 更新）
+  const isAnimatingRef = useRef(false);
+  // 标记是否刚刚从动画恢复（用于防止恢复后的 outputScriptLines 被覆盖）
+  const justRestoredFromAnimationRef = useRef(false);
 
   // WebGAL 模式相关状态
   const [selectedGameFolder, setSelectedGameFolder] = useState<string | null>(null);
@@ -303,18 +311,125 @@ export default function TransformEditor() {
 
   // 真正的动画播放功能
   const playAnimation = () => {
-    // 使用原始 transforms（未合并的）来构建动画序列
-    const rawTransforms = originalTransforms.length > 0 ? originalTransforms : transforms;
-    
-    if (rawTransforms.length === 0) {
+    // 使用当前 transforms（包含所有已添加的 changeFigure 和 setTransform）
+    // applyFigureIDSystem 现在不合并 setTransform，所以 transforms 应该同时包含两者
+    if (transforms.length === 0) {
       alert("请先添加一些变换后再播放动画");
       return;
     }
 
+    // 标记开始动画播放
+    isAnimatingRef.current = true;
+    
+    // 保存原始的 outputScriptLines（用于避免精度损失）
+    originalOutputScriptLinesRef.current = [...outputScriptLines];
+    
+    // 在构建动画序列之前，先保存原始的 setTransform 状态（用于动画结束后恢复）
+    // 直接从 outputScriptLines 提取原始值，避免重复缩放
+    originalSetTransformsRef.current.clear();
+    
+    // 如果 outputScriptLines 存在，从中提取原始的 setTransform 值
+    // outputScriptLines 中的值是逻辑坐标（通过 exportScript 转换的），需要转换为画布坐标
+    if (outputScriptLines.length > 0) {
+      outputScriptLines.forEach(line => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('setTransform:')) {
+          try {
+            // 提取 JSON 字符串
+            const jsonStr = trimmed.replace('setTransform:', '').split(' -')[0].trim();
+            const json = JSON.parse(jsonStr);
+            
+            // 提取参数
+            const paramStr = trimmed.replace('setTransform:' + jsonStr, '').trim();
+            const params: Record<string, string> = {};
+            paramStr.split(' -').forEach(part => {
+              if (part.includes('=')) {
+                const [k, v] = part.split('=').map(s => s.trim());
+                params[k] = v;
+              } else if (part.trim()) {
+                params[part.trim()] = '';
+              }
+            });
+            
+            const target = params.target;
+            if (target) {
+              // 将逻辑坐标转换为画布坐标（和 parseScript 一样的转换）
+              // outputScriptLines 中的值是逻辑坐标，需要转换为画布坐标（乘以 scaleX/scaleY）
+              const transform = {
+                ...json,
+                position: {
+                  x: (json.position?.x || 0) * scaleX,
+                  y: (json.position?.y || 0) * scaleY
+                },
+                scale: json.scale || { x: 1, y: 1 }
+              };
+              
+              const originalState: TransformData = {
+                type: 'setTransform',
+                target: target,
+                duration: parseInt(params.duration || '500'),
+                transform: transform,
+                ease: params.ease
+              };
+              
+              originalSetTransformsRef.current.set(target, originalState);
+              console.log(`🎬 保存原始 setTransform [${target}] (从 outputScriptLines):`, {
+                transform,
+                ease: originalState.ease,
+                duration: originalState.duration,
+                position: transform.position
+              });
+            }
+          } catch (e) {
+            console.warn('解析 outputScriptLines 中的 setTransform 失败:', e);
+          }
+        }
+      });
+    }
+    
+    // 如果从 outputScriptLines 没有找到，则从当前 transforms 中获取（向后兼容）
+    if (originalSetTransformsRef.current.size === 0) {
+      transforms.forEach(t => {
+        if (t.type === 'setTransform' && t.target && !originalSetTransformsRef.current.has(t.target)) {
+          // 深拷贝保存原始状态
+          const originalState = JSON.parse(JSON.stringify(t));
+          originalSetTransformsRef.current.set(t.target, originalState);
+          console.log(`🎬 保存原始 setTransform [${t.target}] (从 transforms):`, originalState.transform);
+        }
+      });
+    }
+
+    // 创建临时的 transforms 数组，使用原始值替换 setTransform 的值（用于构建动画序列）
+    const transformsForAnimation = transforms.map(t => {
+      if (t.type === 'setTransform' && t.target) {
+        const original = originalSetTransformsRef.current.get(t.target);
+        if (original) {
+          // 使用保存的原始值
+          return JSON.parse(JSON.stringify(original));
+        }
+      }
+      // 其他类型保持不变
+      return JSON.parse(JSON.stringify(t));
+    });
+
     // 使用新的动画序列构建函数
-    const animationSequence = buildAnimationSequence(rawTransforms);
+    // 使用包含原始值的 transforms 来构建动画序列
+    console.log("🎬 构建动画序列，使用原始值的 transforms:", transformsForAnimation);
+    const animationSequence = buildAnimationSequence(transformsForAnimation);
+    console.log("🎬 动画序列结果:", animationSequence);
     
     if (animationSequence.length === 0) {
+      // 调试信息：显示 transforms 中实际包含的类型
+      const hasChangeFigure = transformsForAnimation.some(t => t.type === 'changeFigure');
+      const hasSetTransform = transformsForAnimation.some(t => t.type === 'setTransform');
+      console.error("⚠️ 无法找到动画序列:", {
+        transformsLength: transformsForAnimation.length,
+        hasChangeFigure,
+        hasSetTransform,
+        transforms: transformsForAnimation.map(t => ({ type: t.type, target: t.target }))
+      });
+      // 清除动画标记
+      isAnimatingRef.current = false;
       alert("⚠️ 没有找到任何可播放的动画序列（需要 changeFigure 和 setTransform 组合）");
       return;
     }
@@ -322,7 +437,7 @@ export default function TransformEditor() {
     // 在开始播放前，将 transforms 重置为初始状态（changeFigure 的状态）
     // 找到每个 target 的初始 changeFigure 状态
     const initialFigureStates = new Map<string, TransformData>();
-    for (const transform of rawTransforms) {
+    for (const transform of transforms) {
       if (transform.type === 'changeFigure') {
         const figureID = transform.target;
         if (figureID && !initialFigureStates.has(figureID)) {
@@ -332,17 +447,33 @@ export default function TransformEditor() {
     }
 
     // 更新 transforms 为初始状态（changeFigure 的状态，不带动画）
+    // 注意：现在需要更新 setTransform，而不是 changeFigure
     setTransforms(prev => {
       const newTransforms = [...prev];
       // 更新已有的 transform，保留其他属性但重置 transform
       initialFigureStates.forEach((initialState, figureID) => {
-        const index = newTransforms.findIndex(t => t.target === figureID);
-        if (index !== -1) {
-          // 保留原有的所有属性，但将 transform 重置为初始状态
-          newTransforms[index] = {
-            ...newTransforms[index],
+        // 查找对应的 setTransform（如果有）
+        const setTransformIndex = newTransforms.findIndex(
+          t => t.type === "setTransform" && t.target === figureID
+        );
+        
+        if (setTransformIndex !== -1) {
+          // 更新 setTransform 的 transform 为初始状态（changeFigure 的状态）
+          newTransforms[setTransformIndex] = {
+            ...newTransforms[setTransformIndex],
             transform: JSON.parse(JSON.stringify(initialState.transform))
           };
+        } else {
+          // 如果没有 setTransform，查找 changeFigure（向后兼容）
+          const changeFigureIndex = newTransforms.findIndex(
+            t => t.type === "changeFigure" && t.target === figureID
+          );
+          if (changeFigureIndex !== -1) {
+            newTransforms[changeFigureIndex] = {
+              ...newTransforms[changeFigureIndex],
+              transform: JSON.parse(JSON.stringify(initialState.transform))
+            };
+          }
         }
       });
       return newTransforms;
@@ -366,6 +497,35 @@ export default function TransformEditor() {
     setIsPlaying(false);
     setAnimationStartTime(null);
     setAnimationData([]);
+    
+    // 恢复原始的 setTransform 状态
+    setTransforms(prev => {
+      const newTransforms = [...prev];
+      originalSetTransformsRef.current.forEach((originalSetTransform, target) => {
+        const setTransformIndex = newTransforms.findIndex(
+          t => t.type === "setTransform" && t.target === target
+        );
+        if (setTransformIndex !== -1) {
+          // 恢复原始的 setTransform 状态
+          newTransforms[setTransformIndex] = JSON.parse(JSON.stringify(originalSetTransform));
+        }
+      });
+      return newTransforms;
+    });
+    
+    // 恢复原始的 outputScriptLines（避免精度损失）
+    if (originalOutputScriptLinesRef.current.length > 0) {
+      setOutputScriptLines([...originalOutputScriptLinesRef.current]);
+      console.log(`⏹️ 恢复原始 outputScriptLines (避免精度损失)`);
+      // 标记刚刚从动画恢复，让 useEffect 跳过下一次更新
+      justRestoredFromAnimationRef.current = true;
+    }
+    
+    // 清空保存的原始状态
+    originalSetTransformsRef.current.clear();
+    originalOutputScriptLinesRef.current = [];
+    // 清除动画标记，允许 outputScriptLines 更新
+    isAnimatingRef.current = false;
     console.log("⏹️ 动画已停止");
   };
 
@@ -405,9 +565,8 @@ export default function TransformEditor() {
     const maxEndTime = Math.max(...animationData.map(a => a.endTime));
     
     if (currentTime >= maxEndTime) {
-      // 动画结束
-      setIsPlaying(false);
-      setAnimationStartTime(null);
+      // 动画结束（但不在这里设置 isPlaying(false)，让动画循环处理）
+      // 返回 null 表示动画结束，动画循环会处理恢复逻辑
       return null;
     }
 
@@ -614,15 +773,32 @@ export default function TransformEditor() {
       const currentState = getCurrentAnimationState();
       if (currentState && Array.isArray(currentState)) {
         // 更新 transforms 以显示当前动画状态
+        // 注意：现在需要更新 setTransform，而不是 changeFigure
         setTransforms(prev => {
           const newTransforms = [...prev];
           currentState.forEach((animState: any) => {
-            const index = newTransforms.findIndex(t => t.target === animState.target);
-            if (index !== -1) {
-              newTransforms[index] = {
-                ...newTransforms[index],
+            // 查找对应的 setTransform（如果有）
+            const setTransformIndex = newTransforms.findIndex(
+              t => t.type === "setTransform" && t.target === animState.target
+            );
+            
+            if (setTransformIndex !== -1) {
+              // 更新 setTransform 的 transform
+              newTransforms[setTransformIndex] = {
+                ...newTransforms[setTransformIndex],
                 transform: JSON.parse(JSON.stringify(animState.transform))
               };
+            } else {
+              // 如果没有 setTransform，查找 changeFigure（向后兼容）
+              const changeFigureIndex = newTransforms.findIndex(
+                t => t.type === "changeFigure" && t.target === animState.target
+              );
+              if (changeFigureIndex !== -1) {
+                newTransforms[changeFigureIndex] = {
+                  ...newTransforms[changeFigureIndex],
+                  transform: JSON.parse(JSON.stringify(animState.transform))
+                };
+              }
             }
           });
           return newTransforms;
@@ -631,7 +807,62 @@ export default function TransformEditor() {
         // 继续动画循环
         requestAnimationFrame(animationLoop);
       } else if (currentState === null) {
-        // 动画结束，不再继续循环
+        // 动画结束，恢复原始的 setTransform 状态
+        // 先恢复 setTransform，再设置 isPlaying(false)，确保 outputScriptLines 同步时使用恢复后的值
+        setTransforms(prev => {
+          const newTransforms = [...prev];
+          originalSetTransformsRef.current.forEach((originalSetTransform, target) => {
+            const setTransformIndex = newTransforms.findIndex(
+              t => t.type === "setTransform" && t.target === target
+            );
+            if (setTransformIndex !== -1) {
+              // 恢复原始的 setTransform 状态
+              const restored = JSON.parse(JSON.stringify(originalSetTransform));
+              newTransforms[setTransformIndex] = restored;
+              console.log(`🎬 恢复原始 setTransform [${target}]:`, {
+                transform: restored.transform,
+                ease: restored.ease,
+                duration: restored.duration,
+                position: restored.transform.position,
+                savedPosition: originalSetTransform.transform.position
+              });
+            }
+          });
+          return newTransforms;
+        });
+        
+        // 恢复原始的 outputScriptLines（避免精度损失）
+        // 先保存，再恢复，然后再清空
+        const savedOutputScriptLines = originalOutputScriptLinesRef.current.length > 0 
+          ? [...originalOutputScriptLinesRef.current] 
+          : [];
+        
+        if (savedOutputScriptLines.length > 0) {
+          setOutputScriptLines([...savedOutputScriptLines]);
+          console.log(`🎬 恢复原始 outputScriptLines (避免精度损失)`);
+        }
+        
+        // 清空保存的原始状态
+        originalSetTransformsRef.current.clear();
+        originalOutputScriptLinesRef.current = [];
+        
+        // 使用 setTimeout 确保恢复完成后再设置 isPlaying(false)
+        // 并且确保 outputScriptLines 的同步逻辑不会覆盖恢复的值
+        setTimeout(() => {
+          // 再次确保 outputScriptLines 是原始值（防止 useEffect 覆盖）
+          if (savedOutputScriptLines.length > 0) {
+            setOutputScriptLines([...savedOutputScriptLines]);
+          }
+          
+          // 标记刚刚从动画恢复，让 useEffect 跳过下一次更新
+          justRestoredFromAnimationRef.current = true;
+          
+          setIsPlaying(false);
+          setAnimationStartTime(null);
+          // 清除动画标记，允许 outputScriptLines 更新（但我们已经恢复了原始值）
+          isAnimatingRef.current = false;
+        }, 0);
+        
         return;
       } else {
         // 继续循环等待动画开始
@@ -650,13 +881,24 @@ export default function TransformEditor() {
   }, []);
 
   // 同步 transforms 到 outputScript
+  // 注意：动画播放时，不更新 outputScript，保持原始代码不变
   useEffect(() => {
+    // 双重检查：既检查 isPlaying 状态，也检查 ref 标记
+    if (isPlaying || isAnimatingRef.current) {
+      // 动画播放时，不更新 outputScript
+      return;
+    }
+    // 如果刚刚从动画恢复，跳过这次更新，避免覆盖恢复的 outputScriptLines
+    if (justRestoredFromAnimationRef.current) {
+      justRestoredFromAnimationRef.current = false;
+      return;
+    }
     if (Array.isArray(transforms)) {
       const script = exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight, ease === "default" ? undefined : ease);
       const lines = script.split('\n').filter(line => line.trim().length > 0);
       setOutputScriptLines(lines);
     }
-  }, [transforms, exportDuration, ease, canvasWidth, canvasHeight, baseWidth, baseHeight]);
+  }, [transforms, exportDuration, ease, canvasWidth, canvasHeight, baseWidth, baseHeight, isPlaying]);
 
   // 处理 output script 编辑
   const handleOutputScriptChange = async (newScript: string) => {
@@ -816,6 +1058,70 @@ export default function TransformEditor() {
         }}
       >
         + Add setTransform
+      </button>
+      <button
+        onClick={() => {
+          // 收集所有需要添加 setTransform 的 targets
+          const targetsToAdd = new Set<string>();
+          
+          // 找到所有立绘（changeFigure 类型）
+          transforms.forEach((t) => {
+            if (t.type === "changeFigure" && t.target) {
+              targetsToAdd.add(t.target);
+            }
+          });
+          
+          // 检查是否有背景（changeBg 类型或 target === "bg-main"）
+          const hasBackground = transforms.some(
+            (t) => t.type === "changeBg" || (t.target === "bg-main")
+          );
+          if (hasBackground) {
+            targetsToAdd.add("bg-main");
+          }
+          
+          // 检查哪些 target 还没有对应的 setTransform
+          const existingTargets = new Set(
+            transforms
+              .filter((t) => t.type === "setTransform" && t.target)
+              .map((t) => t.target)
+          );
+          
+          // 只添加还没有 setTransform 的 targets
+          const targetsWithoutSetTransform = Array.from(targetsToAdd).filter(
+            (target) => !existingTargets.has(target)
+          );
+          
+          if (targetsWithoutSetTransform.length === 0) {
+            alert("所有立绘和背景都已存在 setTransform！");
+            return;
+          }
+          
+          // 为每个 target 创建新的 setTransform
+          const newItems: TransformData[] = targetsWithoutSetTransform.map((target) => {
+            const newItem: TransformData = {
+              type: "setTransform",
+              target: target,
+              duration: 0,
+              transform: { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } },
+            };
+            if (target !== "bg-main") {
+              (newItem as any).presetPosition = "center";
+            }
+            return newItem;
+          });
+          
+          // 添加到 transforms
+          setTransforms((prev) => [...prev, ...newItems]);
+          
+          // 选中新添加的项目
+          const newIndexes = Array.from(
+            { length: newItems.length },
+            (_, i) => transforms.length + i
+          );
+          setSelectedIndexes(newIndexes);
+        }}
+      >
+        + Add All setTransform
       </button>
 
       <div style={{ margin: "10px 0" }}>
