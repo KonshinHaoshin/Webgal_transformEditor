@@ -226,12 +226,12 @@ export default function CanvasRenderer(props: Props) {
             const container = new PixiContainer();
             const isBg = t.target === "bg-main";
             
-            // 对于非背景的立绘，查找对应的 setTransform（如果有的话）
+            // 对于立绘和背景，查找对应的 setTransform（如果有的话）
             let transformToUse = t.transform;
-            if (!isBg && t.type === "changeFigure") {
+            if (t.type === "changeFigure" || t.type === "changeBg") {
                 const setTransform = setTransformMap.get(t.target);
                 if (setTransform) {
-                    // 使用 setTransform 的 transform，而不是 changeFigure 的 transform
+                    // 使用 setTransform 的 transform，而不是 changeFigure/changeBg 的 transform
                     transformToUse = setTransform.transform;
                 }
             }

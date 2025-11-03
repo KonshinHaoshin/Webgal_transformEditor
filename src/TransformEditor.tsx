@@ -434,11 +434,11 @@ export default function TransformEditor() {
       return;
     }
 
-    // 在开始播放前，将 transforms 重置为初始状态（changeFigure 的状态）
-    // 找到每个 target 的初始 changeFigure 状态
+    // 在开始播放前，将 transforms 重置为初始状态（changeFigure/changeBg 的状态）
+    // 找到每个 target 的初始 changeFigure/changeBg 状态
     const initialFigureStates = new Map<string, TransformData>();
     for (const transform of transforms) {
-      if (transform.type === 'changeFigure') {
+      if (transform.type === 'changeFigure' || transform.type === 'changeBg') {
         const figureID = transform.target;
         if (figureID && !initialFigureStates.has(figureID)) {
           initialFigureStates.set(figureID, { ...transform });
@@ -464,13 +464,13 @@ export default function TransformEditor() {
             transform: JSON.parse(JSON.stringify(initialState.transform))
           };
         } else {
-          // 如果没有 setTransform，查找 changeFigure（向后兼容）
-          const changeFigureIndex = newTransforms.findIndex(
-            t => t.type === "changeFigure" && t.target === figureID
+          // 如果没有 setTransform，查找 changeFigure/changeBg（向后兼容）
+          const changeIndex = newTransforms.findIndex(
+            t => (t.type === "changeFigure" || t.type === "changeBg") && t.target === figureID
           );
-          if (changeFigureIndex !== -1) {
-            newTransforms[changeFigureIndex] = {
-              ...newTransforms[changeFigureIndex],
+          if (changeIndex !== -1) {
+            newTransforms[changeIndex] = {
+              ...newTransforms[changeIndex],
               transform: JSON.parse(JSON.stringify(initialState.transform))
             };
           }
@@ -789,13 +789,13 @@ export default function TransformEditor() {
                 transform: JSON.parse(JSON.stringify(animState.transform))
               };
             } else {
-              // 如果没有 setTransform，查找 changeFigure（向后兼容）
-              const changeFigureIndex = newTransforms.findIndex(
-                t => t.type === "changeFigure" && t.target === animState.target
+              // 如果没有 setTransform，查找 changeFigure/changeBg（向后兼容）
+              const changeIndex = newTransforms.findIndex(
+                t => (t.type === "changeFigure" || t.type === "changeBg") && t.target === animState.target
               );
-              if (changeFigureIndex !== -1) {
-                newTransforms[changeFigureIndex] = {
-                  ...newTransforms[changeFigureIndex],
+              if (changeIndex !== -1) {
+                newTransforms[changeIndex] = {
+                  ...newTransforms[changeIndex],
                   transform: JSON.parse(JSON.stringify(animState.transform))
                 };
               }

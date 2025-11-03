@@ -144,42 +144,57 @@ export function buildAnimationSequence(transforms: TransformData[]): Array<{
         setTransforms: TransformData[];
     }>();
     
-    // 收集每个 figureID 的所有相关命令
+    // 收集每个 figureID 的所有相关命令（包括背景）
     for (const transform of transforms) {
-        if (transform.type === 'rawText' || transform.type === 'changeBg') {
+        if (transform.type === 'rawText') {
             continue;
         }
         
         const figureID = transform.target;
-        if (!figureID || figureID === 'bg-main') {
+        if (!figureID) {
             continue;
         }
         
+        // 支持背景（bg-main）和立绘
         if (!figureAnimations.has(figureID)) {
-            figureAnimations.set(figureID, { setTransforms: [] });
+            figureAnimations.set(figureID, { 
+                changeFigure: undefined,
+                setTransforms: [] 
+            });
         }
         
         const anim = figureAnimations.get(figureID)!;
         
         if (transform.type === 'changeFigure') {
             anim.changeFigure = transform;
+        } else if (transform.type === 'changeBg') {
+            // 将 changeBg 作为 changeFigure 处理（用于背景动画）
+            anim.changeFigure = transform;
         } else if (transform.type === 'setTransform') {
             anim.setTransforms.push(transform);
         }
     }
     
-    // 为每个 figureID 构建动画
-    let currentTime = 0;
+    // 为每个 figureID 构建动画（包括背景）
+    // 所有动画同时开始（从 time 0 开始）
     figureAnimations.forEach((anim, figureID) => {
-        if (!anim.changeFigure) {
-            // 没有 changeFigure，跳过
+        if (!anim.changeFigure && anim.setTransforms.length === 0) {
+            // 没有 changeFigure/changeBg 且没有 setTransform，跳过
             return;
         }
         
-        // 起始状态：changeFigure 的 transform（深拷贝以确保完整性）
-        let currentState = JSON.parse(JSON.stringify(anim.changeFigure.transform));
+        // 起始状态：如果有 changeFigure/changeBg，使用它的 transform；否则使用第一个 setTransform 的 transform
+        let currentState: any;
+        if (anim.changeFigure) {
+            currentState = JSON.parse(JSON.stringify(anim.changeFigure.transform));
+        } else if (anim.setTransforms.length > 0) {
+            // 如果没有 changeFigure/changeBg，使用第一个 setTransform 作为起始状态
+            currentState = JSON.parse(JSON.stringify(anim.setTransforms[0].transform));
+        } else {
+            return; // 不应该到达这里
+        }
         
-        // 处理每个 setTransform
+        // 处理每个 setTransform，所有都从 time 0 开始（同时播放）
         for (const setTransform of anim.setTransforms) {
             // 结束状态：直接使用 setTransform 的 transform（已经是绝对位置）
             // 不需要合并，因为 setTransform 的 transform 已经是最终状态
@@ -197,19 +212,20 @@ export function buildAnimationSequence(transforms: TransformData[]): Array<{
             const ease = setTransform.ease || 'easeInOut';
             
             // 深拷贝状态以确保所有属性都被正确保留
+            // 所有动画都从 time 0 开始，实现同时播放
             animationSequence.push({
                 target: figureID,
                 duration,
                 ease,
                 startState: JSON.parse(JSON.stringify(currentState)),
                 endState: JSON.parse(JSON.stringify(endState)),
-                startTime: currentTime,
-                endTime: currentTime + duration
+                startTime: 0, // 所有动画同时开始
+                endTime: duration // 结束时间是持续时间
             });
             
-            // 更新当前状态为结束状态（用于下一个 setTransform 的起始状态）
+            // 更新当前状态为结束状态（用于同一个 figure 的下一个 setTransform 的起始状态）
+            // 注意：同一个 figure 的多个 setTransform 会共享同一个起始状态（changeFigure 的状态）
             currentState = endState;
-            currentTime += duration;
         }
     });
     
