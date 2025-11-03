@@ -104,10 +104,10 @@ export function exportScript(
         if (obj.type === "changeFigure") {
             const transform = {
                 ...obj.transform,
-                position: {
+                position: obj.transform.position ? {
                     x: obj.transform.position.x * scaleRatioX,
                     y: obj.transform.position.y * scaleRatioY,
-                },
+                } : { x: 0, y: 0 },
                 // 确保 scale 值不被修改，保持原始的 x 和 y 值
                 scale: obj.transform.scale || { x: 1, y: 1 }
             };

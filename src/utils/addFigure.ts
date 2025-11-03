@@ -32,7 +32,7 @@ export function addFigureTransform(p: AddFigureParams) {
     const {
         key,
         stageWidth, stageHeight,
-        baseWidth, baseHeight,
+        baseWidth: _baseWidth, baseHeight: _baseHeight,
         imageWidth, imageHeight,
         // @ts-ignore
         modelOriginalWidth, modelOriginalHeight,
@@ -64,11 +64,7 @@ export function addFigureTransform(p: AddFigureParams) {
     // 你的绘制宽： drawW = modelOriginalWidth * (canvasWidth/baseWidth) * scale
     // 需要让 drawW == targetW
     // => scale = targetW / (modelOriginalWidth * (stageWidth/baseWidth))
-    const scaleX = stageWidth / baseWidth;
-    // @ts-ignore
-    const scaleY = stageHeight / baseHeight;
-    // 这里你的渲染横纵都乘用了相同 scale，所以取任一轴即可
-    const solvedScale = targetW / (modelOriginalWidth * scaleX);
+    // 注意：scaleX 和 scaleY 在当前实现中未被使用，保留以备将来使用
 
     const transform: any = {
         type: "setTransform" as const,

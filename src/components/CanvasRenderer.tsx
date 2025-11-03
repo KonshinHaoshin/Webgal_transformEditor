@@ -125,6 +125,9 @@ export default function CanvasRenderer(props: Props) {
                 if (obj.type === 'setTransform' || obj.type === 'rawText') {
                     continue;
                 }
+                if (!obj.transform.position || !obj.transform.scale) {
+                    continue;
+                }
                 const { x, y } = obj.transform.position;
                 const scale = obj.transform.scale.x;
                 const isBg = obj.target === 'bg-main';
@@ -168,6 +171,9 @@ export default function CanvasRenderer(props: Props) {
                                     // 如果选中的是 changeFigure/changeBg，也需要缩放它（可能需要同时缩放对应的 setTransform）
                                     const currentScale = selectedObj.transform.scale?.x || 1;
                                     const newScale = Math.max(0.1, currentScale + delta);
+                                    if (!copy[selectedIndex].transform.scale) {
+                                        copy[selectedIndex].transform.scale = { x: 1, y: 1 };
+                                    }
                                     copy[selectedIndex].transform.scale.x = newScale;
                                     copy[selectedIndex].transform.scale.y = newScale;
                                     
@@ -196,8 +202,14 @@ export default function CanvasRenderer(props: Props) {
                         const newScale = Math.max(0.1, scale + delta);
                         setTransforms(prev => {
                             const copy = [...prev];
-                            copy[index].transform.scale.x = newScale;
-                            copy[index].transform.scale.y = newScale;
+                            if (!copy[index].transform.scale) {
+                                copy[index].transform.scale = { x: 1, y: 1 };
+                            }
+                            const scaleObj = copy[index].transform.scale;
+                            if (scaleObj) {
+                                scaleObj.x = newScale;
+                                scaleObj.y = newScale;
+                            }
                             // 如果这是 changeFigure/changeBg，也需要更新对应的 setTransform（如果有）
                             if ((obj.type === 'changeFigure' || obj.type === 'changeBg')) {
                                 const setTransformIdx = copy.findIndex(
@@ -229,6 +241,9 @@ export default function CanvasRenderer(props: Props) {
                         if (selectedObj) {
                             const currentScale = selectedObj.transform.scale?.x || 1;
                             const newScale = Math.max(0.1, currentScale + delta);
+                            if (!copy[selectedIndex].transform.scale) {
+                                copy[selectedIndex].transform.scale = { x: 1, y: 1 };
+                            }
                             copy[selectedIndex].transform.scale.x = newScale;
                             copy[selectedIndex].transform.scale.y = newScale;
                             
@@ -649,6 +664,9 @@ export default function CanvasRenderer(props: Props) {
                                 });
                             } else {
                                 // 如果没有 setTransform，使用原来的逻辑（不应该发生，但保险起见）
+                                if (!transforms[i].transform.position) {
+                                    return;
+                                }
                                 const cx = centerX + transforms[i].transform.position.x * scaleX;
                                 const cy = centerY + transforms[i].transform.position.y * scaleY;
                                 const angleNow = Math.atan2(localPos.y - cy, localPos.x - cx);
@@ -688,6 +706,9 @@ export default function CanvasRenderer(props: Props) {
                                             }
                                         } else {
                                             // 如果没有 setTransform，使用原来的逻辑（不应该发生，但保险起见）
+                                            if (!copy[idx].transform.position) {
+                                                copy[idx].transform.position = { x: 0, y: 0 };
+                                            }
                                             if (!lockX) {
                                                 copy[idx].transform.position.x = initialPos.x + deltaX / scaleX;
                                             }
