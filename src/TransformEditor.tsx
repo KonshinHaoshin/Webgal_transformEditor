@@ -16,7 +16,6 @@ export default function TransformEditor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [input, setInput] = useState("");
   const [transforms, setTransforms] = useState<TransformData[]>([]);
-  const [originalTransforms, setOriginalTransforms] = useState<TransformData[]>([]); // 保存原始未合并的 transforms 用于动画
   const [dragging] = useState<number | null>(null);
   const [modelImg, setModelImg] = useState<HTMLImageElement | null>(null);
   const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
@@ -936,7 +935,6 @@ export default function TransformEditor() {
         await parseAndLoadImages(newScript);
       }
       
-      setOriginalTransforms(parsed);
       setTransforms(merged);
       setSelectedIndexes([]);
     } catch (error) {
@@ -1025,8 +1023,7 @@ export default function TransformEditor() {
             await parseAndLoadImages(input);
           }
           
-          // 保存原始 transforms（用于动画）和合并后的 transforms（用于渲染）
-          setOriginalTransforms(parsed);
+          // 保存合并后的 transforms（用于渲染）
           setTransforms(merged);
            setAllSelected(false);
            setSelectedIndexes([]);
