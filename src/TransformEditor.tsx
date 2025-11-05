@@ -27,10 +27,17 @@ export default function TransformEditor() {
       if (enabledTargets.size > 0) {
         return newIndexes.filter(idx => {
           const t = transforms[idx];
+          // 安全监测，确保t.target不为空
+          if (!t || !t.target) return false;
           return enabledTargets.has(t.target);
         });
       }
-      return newIndexes;
+      return newIndexes.filter(idx => {
+        const t = transforms[idx];
+        // 安全监测，确保t.target不为空
+        if (!t || !t.target) return false;
+        return true;
+      });
     });
   };
   const [, setAllSelected] = useState(false);
@@ -1225,15 +1232,42 @@ export default function TransformEditor() {
       >
         Deselect All
       </button>
-
       <button
         onClick={() => {
           const name = nextFigureName(transforms);
+
+          // 查找该 target 最近的 changeFigure 或 setTransform（从后往前找）
+          let inheritedTransform: any = {};
+          for (let i = transforms.length - 1; i >= 0; i--) {
+            const t = transforms[i];
+            if ((t.type === "changeFigure" || t.type === "setTransform") && t.target === name) {
+              // 找到最近的，继承其 transform 值
+              if (t.transform) {
+                if (t.transform.position) {
+                  inheritedTransform.position = { ...t.transform.position };
+                }
+                if (t.transform.scale) {
+                  inheritedTransform.scale = { ...t.transform.scale };
+                }
+                if (t.transform.rotation !== undefined) {
+                  inheritedTransform.rotation = t.transform.rotation;
+                }
+              }
+              break; // 找到最近的，退出循环
+            }
+          }
+
+          // 如果没有找到任何值，使用默认值
+          if (Object.keys(inheritedTransform).length === 0) {
+            inheritedTransform.position = { x: 0, y: 0 };
+            inheritedTransform.scale = { x: 1, y: 1 };
+          }
+
           const newItem: TransformData = {
             type: "setTransform",
             target: name,
             duration: 0,
-            transform: { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } },
+            transform: inheritedTransform,
           };
           (newItem as any).presetPosition = "center";
           setTransforms((prev) => [...prev, newItem]);
@@ -1279,13 +1313,41 @@ export default function TransformEditor() {
             return;
           }
           
-          // 为每个 target 创建新的 setTransform
+          // 为每个 target 创建新的 setTransform，继承最近的 changeFigure 或 setTransform
           const newItems: TransformData[] = targetsWithoutSetTransform.map((target) => {
+            // 从后往前查找该 target 最近的 changeFigure 或 setTransform（对于背景还包括 changeBg）
+            let inheritedTransform: any = {};
+
+            for (let i = transforms.length - 1; i >= 0; i--) {
+              const t = transforms[i];
+              // 对于普通 figure，查找 changeFigure 或 setTransform
+              // 对于背景，查找 changeBg 或 setTransform（target === "bg-main"）
+              const isMatch = target === "bg-main"
+                ? ((t.type === "changeBg" || t.type === "setTransform") && t.target === "bg-main")
+                : ((t.type === "changeFigure" || t.type === "setTransform") && t.target === target);
+
+              if (isMatch) {
+                // 找到最近的，继承其 transform 值
+                if (t.transform) {
+                  if (t.transform.position) {
+                    inheritedTransform.position = { ...t.transform.position };
+                  }
+                  if (t.transform.scale) {
+                    inheritedTransform.scale = { ...t.transform.scale };
+                  }
+                  if (t.transform.rotation !== undefined) {
+                    inheritedTransform.rotation = t.transform.rotation;
+                  }
+                }
+                break; // 找到最近的，退出循环
+              }
+            }
+
             const newItem: TransformData = {
               type: "setTransform",
               target: target,
               duration: 0,
-              transform: {}, 
+              transform: inheritedTransform,
             };
             if (target !== "bg-main") {
               (newItem as any).presetPosition = "center";
