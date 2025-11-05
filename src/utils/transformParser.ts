@@ -141,7 +141,7 @@ export function exportScript(
  * 构建动画序列
  * 从原始的 transforms 中，为每个 figureID 构建从 changeFigure 到 setTransform 的动画序列
  */
-export function buildAnimationSequence(transforms: TransformData[]): Array<{
+export function buildAnimationSequence(transforms: TransformData[], transformIndexToScriptLineIndex?: Map<number, number>): Array<{
     target: string;
     duration: number;
     ease: string;
@@ -149,6 +149,7 @@ export function buildAnimationSequence(transforms: TransformData[]): Array<{
     endState: any;
     startTime: number;
     endTime: number;
+    scriptLineIndex?: number; // 对应的脚本行索引（用于断点）
 }> {
     const animationSequence: Array<{
         target: string;
@@ -158,6 +159,7 @@ export function buildAnimationSequence(transforms: TransformData[]): Array<{
         endState: any;
         startTime: number;
         endTime: number;
+        scriptLineIndex?: number;
     }> = [];
     
     // Map<figureID, { changeFigure, setTransforms[] }>
@@ -200,10 +202,13 @@ export function buildAnimationSequence(transforms: TransformData[]): Array<{
     // 按顺序提取所有 setTransform（保持原始顺序）
     // 使用深拷贝确保每个 transform 对象都是独立的
     const allSetTransforms: TransformData[] = [];
-    for (const transform of transforms) {
+    const allSetTransformsOriginalIndex: number[] = []; // 记录每个 setTransform 在 transforms 中的原始索引
+    for (let i = 0; i < transforms.length; i++) {
+        const transform = transforms[i];
         if (transform.type === 'setTransform') {
             // 深拷贝 transform 对象，确保每个 setTransform 都有独立的 transform 对象
             allSetTransforms.push(JSON.parse(JSON.stringify(transform)));
+            allSetTransformsOriginalIndex.push(i); // 记录原始索引
         }
     }
     
@@ -457,6 +462,19 @@ export function buildAnimationSequence(transforms: TransformData[]): Array<{
             console.log(`🎬    endState: ${JSON.stringify(endState)}`);
             console.log(`🎬    duration: ${duration}, startTime: ${currentTime}, endTime: ${currentTime + duration}`);
             
+            // 获取对应的脚本行索引（用于断点）
+            let scriptLineIndex: number | undefined;
+            if (transformIndexToScriptLineIndex) {
+                // 找到当前 setTransform 在 allSetTransforms 中的索引
+                const setTransformIndexInAll = allSetTransforms.findIndex(st => st === setTransform);
+                if (setTransformIndexInAll !== -1) {
+                    // 获取在 transforms 中的原始索引
+                    const originalTransformIndex = allSetTransformsOriginalIndex[setTransformIndexInAll];
+                    // 根据映射找到脚本行索引
+                    scriptLineIndex = transformIndexToScriptLineIndex.get(originalTransformIndex);
+                }
+            }
+            
             // 创建动画序列项
             animationSequence.push({
                 target: target,
@@ -465,7 +483,8 @@ export function buildAnimationSequence(transforms: TransformData[]): Array<{
                 startState: JSON.parse(JSON.stringify(currentState)),
                 endState: JSON.parse(JSON.stringify(endState)),
                 startTime: currentTime,
-                endTime: currentTime + duration
+                endTime: currentTime + duration,
+                scriptLineIndex
             });
             
             // 更新该 target 的状态为结束状态

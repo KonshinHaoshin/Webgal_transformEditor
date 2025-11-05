@@ -9,6 +9,7 @@ export default function ScriptOutputWindow() {
   const [scaleX, setScaleX] = useState(1);
   const [scaleY, setScaleY] = useState(1);
   const [selectedGameFolder, setSelectedGameFolder] = useState<string | null>(null);
+  const [breakpoints, setBreakpoints] = useState<Set<number>>(new Set()); // 断点行索引集合
   const isReceivingUpdateRef = useRef(false); // 标记是否正在接收来自主窗口的更新
   const isInitializedRef = useRef(false); // 标记是否已经初始化（接收过第一次数据）
 
@@ -117,6 +118,24 @@ export default function ScriptOutputWindow() {
     alert("Script copied!");
   };
 
+  // 切换断点状态
+  const toggleBreakpoint = (index: number) => {
+    const newBreakpoints = new Set(breakpoints);
+    if (newBreakpoints.has(index)) {
+      newBreakpoints.delete(index);
+    } else {
+      newBreakpoints.add(index);
+    }
+    setBreakpoints(newBreakpoints);
+
+    // 通知主窗口断点已更新
+    emit('script-output:breakpoints-changed', {
+      breakpoints: Array.from(newBreakpoints)
+    }).catch(() => {
+      // 忽略错误
+    });
+  };
+
   return (
     <div style={{ 
       width: '100%', 
@@ -168,6 +187,29 @@ export default function ScriptOutputWindow() {
                 border: '1px solid #e0e0e0'
               }}
             >
+              {/* 断点按钮 */}
+              <button
+                onClick={() => toggleBreakpoint(index)}
+                style={{
+                  marginRight: '8px',
+                  padding: '4px 8px',
+                  fontSize: '14px',
+                  backgroundColor: breakpoints.has(index) ? '#ff6b6b' : '#e0e0e0',
+                  color: breakpoints.has(index) ? '#fff' : '#666',
+                  border: 'none',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  minWidth: '24px',
+                  height: '24px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                title={breakpoints.has(index) ? "移除断点" : "设置断点"}
+              >
+                {breakpoints.has(index) ? '●' : '○'}
+              </button>
               <textarea
                 ref={(el) => adjustTextareaHeight(el)}
                 value={line}
@@ -191,7 +233,7 @@ export default function ScriptOutputWindow() {
                   minHeight: '20px',
                   lineHeight: '16px',
                   overflowY: 'hidden',
-                  backgroundColor: 'transparent',
+                  backgroundColor: breakpoints.has(index) ? '#fff3cd' : 'transparent',
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-all'
                 }}

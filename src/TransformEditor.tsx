@@ -119,6 +119,12 @@ export default function TransformEditor() {
 
   // 可编辑的 output script
   const [outputScriptLines, setOutputScriptLines] = useState<string[]>([]);
+  // 保存完整的 outputScriptLines（不受断点影响）
+  const fullOutputScriptLinesRef = useRef<string[]>([]);
+  // 断点行索引集合
+  const [breakpoints, setBreakpoints] = useState<Set<number>>(new Set());
+  // 标记是否正在处理断点更新（防止循环更新）
+  const isProcessingBreakpointRef = useRef(false);
 
   const scaleX = canvasWidth / baseWidth;
   const scaleY = canvasHeight / baseHeight;
@@ -374,7 +380,12 @@ export default function TransformEditor() {
     isAnimatingRef.current = true;
     
     // 保存原始的 outputScriptLines（用于避免精度损失）
-    originalOutputScriptLinesRef.current = [...outputScriptLines];
+    // 如果有断点，优先使用 fullOutputScriptLinesRef 保存的完整脚本
+    if (breakpoints.size > 0 && fullOutputScriptLinesRef.current.length > 0) {
+      originalOutputScriptLinesRef.current = [...fullOutputScriptLinesRef.current];
+    } else {
+      originalOutputScriptLinesRef.current = [...outputScriptLines];
+    }
     
     // 在构建动画序列之前，先保存原始的 setTransform 状态（用于动画结束后恢复）
     // 直接从 outputScriptLines 提取原始值，避免重复缩放
@@ -471,10 +482,52 @@ export default function TransformEditor() {
     });
 
 
+    // 建立 outputScriptLines 到 transforms 的映射（每行脚本对应哪个 transform 索引）
+    // 通过解析每行脚本来建立映射
+    const transformIndexToScriptLineIndex = new Map<number, number>();
+    if (outputScriptLines.length > 0) {
+      outputScriptLines.forEach((line, scriptLineIndex) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('setTransform:')) {
+          // 解析这一行，找到对应的 transform
+          try {
+            const jsonStr = trimmed.replace('setTransform:', '').split(' -')[0].trim();
+            const json = JSON.parse(jsonStr);
+            const paramStr = trimmed.replace('setTransform:' + jsonStr, '').trim();
+            const params: Record<string, string> = {};
+            paramStr.split(' -').forEach(part => {
+              if (part.includes('=')) {
+                const [k, v] = part.split('=').map(s => s.trim());
+                params[k] = v;
+              } else if (part.trim()) {
+                params[part.trim()] = '';
+              }
+            });
+            const target = params.target;
+
+            // 在 transforms 中找到匹配的 setTransform
+            if (target) {
+              const transformIndex = transformsForAnimation.findIndex(t =>
+                t.type === 'setTransform' &&
+                t.target === target &&
+                t.transform.position?.x === json.position?.x &&
+                t.transform.position?.y === json.position?.y
+              );
+              if (transformIndex !== -1) {
+                transformIndexToScriptLineIndex.set(transformIndex, scriptLineIndex);
+              }
+            }
+          } catch (e) {
+            // 忽略解析错误
+          }
+        }
+      });
+    }
+
     // 使用新的动画序列构建函数
     // 使用包含原始值的 transforms 来构建动画序列
     console.log("🎬 构建动画序列，使用原始值的 transforms:", transformsForAnimation);
-    const animationSequence = buildAnimationSequence(transformsForAnimation);
+    const animationSequence = buildAnimationSequence(transformsForAnimation, transformIndexToScriptLineIndex);
     console.log("🎬 动画序列结果:", animationSequence);
     
     if (animationSequence.length === 0) {
@@ -573,12 +626,16 @@ export default function TransformEditor() {
     });
     
     // 恢复原始的 outputScriptLines（避免精度损失）
-    if (originalOutputScriptLinesRef.current.length > 0) {
+    // 如果有断点，优先使用 fullOutputScriptLinesRef 保存的完整脚本
+    if (breakpoints.size > 0 && fullOutputScriptLinesRef.current.length > 0) {
+      setOutputScriptLines([...fullOutputScriptLinesRef.current]);
+      console.log(`⏹️ 恢复完整脚本（断点模式）`);
+    } else if (originalOutputScriptLinesRef.current.length > 0) {
       setOutputScriptLines([...originalOutputScriptLinesRef.current]);
       console.log(`⏹️ 恢复原始 outputScriptLines (避免精度损失)`);
-      // 标记刚刚从动画恢复，让 useEffect 跳过下一次更新
-      justRestoredFromAnimationRef.current = true;
     }
+    // 标记刚刚从动画恢复，让 useEffect 跳过下一次更新
+    justRestoredFromAnimationRef.current = true;
     
     // 清空保存的原始状态
     originalSetTransformsRef.current.clear();
@@ -772,11 +829,16 @@ export default function TransformEditor() {
   // 更新脚本输出窗口的数据（使用全局事件）
   const updateScriptOutputWindow = async () => {
     try {
-      // 确保使用最新的 outputScriptLines（如果为空，则从 transforms 生成）
-      let linesToSend = outputScriptLines;
+      // 优先使用完整的脚本行（fullOutputScriptLinesRef），如果没有则使用 outputScriptLines
+      let linesToSend = fullOutputScriptLinesRef.current.length > 0
+        ? fullOutputScriptLinesRef.current
+        : outputScriptLines;
+
+      // 如果还是为空，则从 transforms 生成
       if (linesToSend.length === 0 && Array.isArray(transforms) && transforms.length > 0) {
         const script = exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight, ease === "default" ? undefined : ease);
         linesToSend = script.split('\n').filter(line => line.trim().length > 0);
+        fullOutputScriptLinesRef.current = linesToSend; // 保存完整脚本
       }
 
       await emit('script-output:update-data', {
@@ -863,8 +925,134 @@ export default function TransformEditor() {
     };
   }, []);
 
+  // 监听来自脚本输出窗口的断点更新
+  useEffect(() => {
+    const setupListener = async () => {
+      const unlisten = await listen<{ breakpoints: number[] }>(
+        'script-output:breakpoints-changed',
+        async (event) => {
+          // 防止重复处理
+          if (isProcessingBreakpointRef.current) {
+            return;
+          }
+
+          // 安全检查：确保 breakpoints 是数组
+          if (event.payload && Array.isArray(event.payload.breakpoints)) {
+            isProcessingBreakpointRef.current = true;
+
+            try {
+              const newBreakpoints = new Set(event.payload.breakpoints);
+              setBreakpoints(newBreakpoints);
+
+              // 使用完整的脚本行（保存的完整脚本或当前的 outputScriptLines）
+              const fullScriptLines = fullOutputScriptLinesRef.current.length > 0
+                ? fullOutputScriptLinesRef.current
+                : outputScriptLines;
+
+              // 如果有断点，重新解析脚本但只到第一个断点行为止
+              if (newBreakpoints.size > 0 && fullScriptLines.length > 0) {
+                // 找到最小的断点索引（第一个断点）
+                const minBreakpointIndex = Math.min(...Array.from(newBreakpoints));
+
+                // 只解析到断点行为止的脚本
+                const scriptToBreakpoint = fullScriptLines.slice(0, minBreakpointIndex + 1).join('\n');
+
+                try {
+                  // 先确保 fullOutputScriptLinesRef 保存了完整脚本（在更新 transforms 之前）
+                  fullOutputScriptLinesRef.current = fullScriptLines;
+                  setOutputScriptLines(fullScriptLines);
+
+                  // 解析脚本
+                  const parsed = parseScript(scriptToBreakpoint, scaleX, scaleY).map((t) => {
+                    const { __presetApplied, ...rest } = t as any;
+                    return rest;
+                  });
+
+                  // 应用 figureID 系统
+                  const merged = applyFigureIDSystem(parsed);
+
+                  // 如果启用了 WebGAL 模式，自动加载图片
+                  if (selectedGameFolder && scriptToBreakpoint.trim()) {
+                    await parseAndLoadImages(scriptToBreakpoint);
+                  }
+
+                  // 更新 transforms（只包含断点之前的内容）
+                  setTransforms(merged);
+
+                  // 手动更新脚本输出窗口，确保发送完整脚本
+                  setTimeout(() => {
+                    updateScriptOutputWindow();
+                  }, 50);
+
+                  console.log(`🛑 应用断点: 只显示到脚本行 ${minBreakpointIndex + 1} 为止`);
+                } catch (error) {
+                  console.error("❌ 解析断点脚本失败:", error);
+                }
+              } else if (newBreakpoints.size === 0) {
+                // 如果没有断点，恢复完整的脚本
+                if (fullScriptLines.length > 0) {
+                  const fullScript = fullScriptLines.join('\n');
+                  try {
+                    // 先确保 fullOutputScriptLinesRef 保存了完整脚本
+                    fullOutputScriptLinesRef.current = fullScriptLines;
+                    setOutputScriptLines(fullScriptLines);
+
+                    const parsed = parseScript(fullScript, scaleX, scaleY).map((t) => {
+                      const { __presetApplied, ...rest } = t as any;
+                      return rest;
+                    });
+
+                    const merged = applyFigureIDSystem(parsed);
+
+                    if (selectedGameFolder && fullScript.trim()) {
+                      await parseAndLoadImages(fullScript);
+                    }
+
+                    setTransforms(merged);
+
+                    // 手动更新脚本输出窗口，确保发送完整脚本
+                    setTimeout(() => {
+                      updateScriptOutputWindow();
+                    }, 50);
+
+                    console.log(`▶️ 移除断点: 恢复完整脚本`);
+                  } catch (error) {
+                    console.error("❌ 解析完整脚本失败:", error);
+                  }
+                }
+              }
+            } finally {
+              // 延迟重置标记，确保所有更新完成
+              setTimeout(() => {
+                isProcessingBreakpointRef.current = false;
+              }, 100);
+            }
+          } else {
+            console.warn('接收到无效的断点数据:', event.payload);
+          }
+        }
+      );
+      return unlisten;
+    };
+
+    let unlistenFn: (() => void) | null = null;
+    setupListener().then(fn => {
+      unlistenFn = fn;
+    });
+
+    return () => {
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
+  }, [scaleX, scaleY, selectedGameFolder]); // 移除 outputScriptLines 依赖，避免循环
+
   // 当 outputScriptLines 或相关参数更新时，更新脚本输出窗口
   useEffect(() => {
+    // 如果正在处理断点更新，跳过
+    if (isProcessingBreakpointRef.current) {
+      return;
+    }
     // 只有在 transforms 是有效数组时才更新
     if (Array.isArray(transforms)) {
       updateScriptOutputWindow();
@@ -975,16 +1163,30 @@ export default function TransformEditor() {
               position: t.transform.position
             })));
             
-            // 基于恢复后的 transforms 重新生成 outputScriptLines
-            const script = exportScript(currentTransforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight, ease === "default" ? undefined : ease);
-            const lines = script.split('\n').filter(line => line.trim().length > 0);
-            setOutputScriptLines(lines);
-            console.log(`🎬 基于恢复后的 transforms 重新生成 outputScriptLines`);
+            // 如果有断点，优先使用 fullOutputScriptLinesRef 保存的完整脚本
+            if (breakpoints.size > 0 && fullOutputScriptLinesRef.current.length > 0) {
+              setOutputScriptLines([...fullOutputScriptLinesRef.current]);
+              console.log(`🎬 恢复完整脚本（断点模式）`);
+            } else {
+              // 基于恢复后的 transforms 重新生成 outputScriptLines
+              const script = exportScript(currentTransforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight, ease === "default" ? undefined : ease);
+              const lines = script.split('\n').filter(line => line.trim().length > 0);
+              setOutputScriptLines(lines);
+              fullOutputScriptLinesRef.current = lines; // 保存完整脚本
+              console.log(`🎬 基于恢复后的 transforms 重新生成 outputScriptLines`);
+            }
             
             // 清空保存的原始状态（在重新生成 outputScriptLines 后再清空）
             originalSetTransformsRef.current.clear();
             originalOutputScriptLinesRef.current = [];
             
+            // 手动更新脚本输出窗口，确保发送完整脚本（如果有断点）
+            if (breakpoints.size > 0) {
+              setTimeout(() => {
+                updateScriptOutputWindow();
+              }, 50);
+            }
+
             // 再延迟一次，确保 outputScriptLines 更新完成后再允许 useEffect 正常更新
             setTimeout(() => {
               justRestoredFromAnimationRef.current = false;
@@ -1070,6 +1272,10 @@ export default function TransformEditor() {
   // 同步 transforms 到 outputScript
   // 注意：动画播放时，不更新 outputScript，保持原始代码不变
   useEffect(() => {
+    // 如果正在处理断点更新，跳过
+    if (isProcessingBreakpointRef.current) {
+      return;
+    }
     // 双重检查：既检查 isPlaying 状态，也检查 ref 标记
     if (isPlaying || isAnimatingRef.current) {
       // 动画播放时，不更新 outputScript
@@ -1082,21 +1288,38 @@ export default function TransformEditor() {
       // 但在最后一次确认后，需要允许更新以确保 transforms 和 outputScriptLines 同步
       return;
     }
-    if (Array.isArray(transforms)) {
-      const script = exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight, ease === "default" ? undefined : ease);
-      const lines = script.split('\n').filter(line => line.trim().length > 0);
-      setOutputScriptLines(lines);
+    // 如果有断点，不更新 outputScriptLines（保持完整脚本）
+    if (breakpoints.size > 0) {
+      return;
     }
-  }, [transforms, exportDuration, ease, canvasWidth, canvasHeight, baseWidth, baseHeight, isPlaying]);
+    if (Array.isArray(transforms)) {
+      try {
+        const script = exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight, ease === "default" ? undefined : ease);
+        const lines = script.split('\n').filter(line => line.trim().length > 0);
+        setOutputScriptLines(lines);
+        fullOutputScriptLinesRef.current = lines; // 保存完整脚本
+      } catch (error) {
+        console.error("❌ 同步 transforms 到 outputScript 失败:", error);
+      }
+    }
+  }, [transforms, exportDuration, ease, canvasWidth, canvasHeight, baseWidth, baseHeight, isPlaying, breakpoints]);
 
   // 处理 output script 编辑
   const handleOutputScriptChange = async (newScript: string) => {
     const lines = newScript.split('\n').filter(line => line.trim().length > 0);
     setOutputScriptLines(lines);
+    fullOutputScriptLinesRef.current = lines; // 保存完整脚本
+
+    // 如果有断点，只解析到断点行为止
+    let scriptToParse = newScript;
+    if (breakpoints.size > 0) {
+      const minBreakpointIndex = Math.min(...Array.from(breakpoints));
+      scriptToParse = lines.slice(0, minBreakpointIndex + 1).join('\n');
+    }
     
     // 解析并更新 transforms
     try {
-      const parsed = parseScript(newScript, scaleX, scaleY).map((t) => {
+      const parsed = parseScript(scriptToParse, scaleX, scaleY).map((t) => {
         const { __presetApplied, ...rest } = t as any;
         return rest;
       });
@@ -1104,8 +1327,8 @@ export default function TransformEditor() {
       const merged = applyFigureIDSystem(parsed);
       
       // 如果启用了 WebGAL 模式，自动加载图片
-      if (selectedGameFolder && newScript.trim()) {
-        await parseAndLoadImages(newScript);
+      if (selectedGameFolder && scriptToParse.trim()) {
+        await parseAndLoadImages(scriptToParse);
       }
       
       setTransforms(merged);
@@ -1281,6 +1504,7 @@ export default function TransformEditor() {
           const script = exportScript(merged, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight, ease === "default" ? undefined : ease);
           const lines = script.split('\n').filter(line => line.trim().length > 0);
           setOutputScriptLines(lines);
+          fullOutputScriptLinesRef.current = lines; // 保存完整脚本
 
           // 自动打开脚本输出窗口
           try {
