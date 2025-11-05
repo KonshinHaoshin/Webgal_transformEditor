@@ -469,17 +469,19 @@ export default function TransformEditor() {
       });
     }
 
-    // 创建临时的 transforms 数组，使用原始值替换 setTransform 的值（用于构建动画序列）
+    // 创建临时的 transforms 数组，直接使用原始 transforms 的深拷贝
+    // 不需要从 originalSetTransformsRef 恢复，因为 transforms 本身就是原始值
     const transformsForAnimation = transforms.map(t => {
-      if (t.type === 'setTransform' && t.target) {
-        const original = originalSetTransformsRef.current.get(t.target);
-        if (original) {
-          // 使用保存的原始值
-          return JSON.parse(JSON.stringify(original));
-        }
-      }
-      // 其他类型保持不变
+      // 深拷贝所有 transform 对象，确保每个都是独立的
       return JSON.parse(JSON.stringify(t));
+    });
+
+    // 调试：打印 transforms 数组中的 setTransform
+    console.log("🎬 原始 transforms 数组中的 setTransform:");
+    transforms.forEach((t, idx) => {
+      if (t.type === 'setTransform') {
+        console.log(`🎬   索引 ${idx}: target=${t.target}, position=${JSON.stringify(t.transform.position)}`);
+      }
     });
 
     // 使用新的动画序列构建函数
@@ -1268,6 +1270,7 @@ export default function TransformEditor() {
             target: name,
             duration: 0,
             transform: inheritedTransform,
+            next: true, // 默认启用 next
           };
           (newItem as any).presetPosition = "center";
           setTransforms((prev) => [...prev, newItem]);
@@ -1334,6 +1337,7 @@ export default function TransformEditor() {
               target: target,
               duration: 0,
               transform: inheritedTransform,
+              next: true, // 默认启用 next
             };
             if (target !== "bg-main") {
               (newItem as any).presetPosition = "center";

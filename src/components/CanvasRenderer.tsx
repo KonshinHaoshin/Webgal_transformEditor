@@ -577,7 +577,6 @@ export default function CanvasRenderer(props: Props) {
             container.x = baseX + px;
             container.y = baseY + py;
             container.rotation = transformToUse.rotation || 0;
-            // ✅ 正确应用 scale 值，x 和 y 轴独立
             // 注意：对于背景，scale 已经应用在 drawW/drawH 上，所以这里设为 1
             if (isBg) {
                 container.scale.set(1, 1);
@@ -707,36 +706,36 @@ export default function CanvasRenderer(props: Props) {
                                     const initialPos = initialPositionsRef.current[idx];
                                     if (initialPos) {
                                         const targetTransform = prev[idx];
-                                    // 查找对应的最后一个 setTransform（如果有）
-                                    const setTransformIdx = findLastSetTransform(copy, targetTransform.target);
+                                        // 查找对应的最后一个 setTransform（如果有）
+                                        const setTransformIdx = findLastSetTransform(copy, targetTransform.target);
 
-                                    if (setTransformIdx !== -1) {
-                                        // 更新 setTransform 的 position（如果不存在则创建）
-                                        if (!copy[setTransformIdx].transform.position) {
-                                            copy[setTransformIdx].transform.position = { x: 0, y: 0 };
-                                        }
-                                        if (!lockX) {
-                                            copy[setTransformIdx].transform.position.x = initialPos.x + deltaX / scaleX;
-                                        }
-                                        if (!lockY) {
-                                            copy[setTransformIdx].transform.position.y = initialPos.y + deltaY / scaleY;
-                                        }
-                                    } else {
-                                        // 如果没有 setTransform，使用原来的逻辑（不应该发生，但保险起见）
-                                        if (!copy[idx].transform.position) {
-                                            copy[idx].transform.position = { x: 0, y: 0 };
-                                        }
-                                        if (!lockX) {
-                                            copy[idx].transform.position.x = initialPos.x + deltaX / scaleX;
-                                        }
-                                        if (!lockY) {
-                                            copy[idx].transform.position.y = initialPos.y + deltaY / scaleY;
+                                        if (setTransformIdx !== -1) {
+                                            // 更新 setTransform 的 position（如果不存在则创建）
+                                            if (!copy[setTransformIdx].transform.position) {
+                                                copy[setTransformIdx].transform.position = { x: 0, y: 0 };
+                                            }
+                                            if (!lockX) {
+                                                copy[setTransformIdx].transform.position.x = initialPos.x + deltaX / scaleX;
+                                            }
+                                            if (!lockY) {
+                                                copy[setTransformIdx].transform.position.y = initialPos.y + deltaY / scaleY;
+                                            }
+                                        } else {
+                                            // 如果没有 setTransform，使用原来的逻辑（不应该发生，但保险起见）
+                                            if (!copy[idx].transform.position) {
+                                                copy[idx].transform.position = { x: 0, y: 0 };
+                                            }
+                                            if (!lockX) {
+                                                copy[idx].transform.position.x = initialPos.x + deltaX / scaleX;
+                                            }
+                                            if (!lockY) {
+                                                copy[idx].transform.position.y = initialPos.y + deltaY / scaleY;
+                                            }
                                         }
                                     }
-                                }
+                                });
+                                return copy;
                             });
-                            return copy;
-                        });
                         }
                     };
 

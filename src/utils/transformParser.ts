@@ -98,7 +98,9 @@ export function exportScript(
             }
             // 如果 obj.ease 是 undefined，不使用 ease 参数（保持原始状态）
             // 如果 transform 是空对象，导出 setTransform:{} 格式
-            return `setTransform:${transformJson} -target=${obj.target} -duration=${exportDuration}${easeParam} -next;`;
+            // 如果 next 为 true，添加 -next 参数
+            const nextParam = obj.next ? " -next" : "";
+            return `setTransform:${transformJson} -target=${obj.target} -duration=${exportDuration}${easeParam}${nextParam};`;
         }
 
         if (obj.type === "changeFigure") {
@@ -124,9 +126,11 @@ export function exportScript(
         }
         if (obj.type=="changeBg")
         {
+            // extras：无值参数输出成 "-k"，有值参数输出 "-k=v"
             const extras = Object.entries(obj.extraParams || {})
-                .map(([k, v]) => `-${k}=${v}`).join(" ");
-            return `changeBg:${obj.path} -transform=${transformJson} ${extras};`;
+                .map(([k, v]) => (v === "" || v === undefined) ? ` -${k}` : ` -${k}=${v}`)
+                .join("");
+            return `changeBg:${obj.path} -transform=${transformJson}${extras};`;
         }
 
         return "";
@@ -193,29 +197,177 @@ export function buildAnimationSequence(transforms: TransformData[]): Array<{
         }
     }
     
-    // 为每个 figureID 构建动画（包括背景）
-    // 所有动画同时开始（从 time 0 开始）
+    // 按顺序提取所有 setTransform（保持原始顺序）
+    // 使用深拷贝确保每个 transform 对象都是独立的
+    const allSetTransforms: TransformData[] = [];
+    for (const transform of transforms) {
+        if (transform.type === 'setTransform') {
+            // 深拷贝 transform 对象，确保每个 setTransform 都有独立的 transform 对象
+            allSetTransforms.push(JSON.parse(JSON.stringify(transform)));
+        }
+    }
+    
+    // 调试：打印 allSetTransforms 的内容
+    console.log(`🎬 allSetTransforms 内容:`);
+    allSetTransforms.forEach((st, idx) => {
+        console.log(`🎬   索引 ${idx}: target=${st.target}, position=${JSON.stringify(st.transform.position)}`);
+    });
+    
+    // 跟踪每个 target 的当前状态
+    const targetStates = new Map<string, any>();
+    
+    // 初始化每个 target 的起始状态（从 changeFigure/changeBg）
     figureAnimations.forEach((anim, figureID) => {
-        if (!anim.changeFigure && anim.setTransforms.length === 0) {
-            // 没有 changeFigure/changeBg 且没有 setTransform，跳过
-            return;
-        }
-        
-        // 起始状态：如果有 changeFigure/changeBg，使用它的 transform；否则使用第一个 setTransform 的 transform
-        let currentState: any;
         if (anim.changeFigure) {
-            currentState = JSON.parse(JSON.stringify(anim.changeFigure.transform));
-        } else if (anim.setTransforms.length > 0) {
-            // 如果没有 changeFigure/changeBg，使用第一个 setTransform 作为起始状态
-            currentState = JSON.parse(JSON.stringify(anim.setTransforms[0].transform));
-        } else {
-            return; // 不应该到达这里
+            targetStates.set(figureID, JSON.parse(JSON.stringify(anim.changeFigure.transform)));
+        }
+    });
+    
+    // 首先，找出所有通过 next 连接的连续序列，并找出每个 target 在序列中的最后一个 setTransform
+    // Map<target, 该 target 在连续序列中最后一个 setTransform 的索引>
+    const targetToLastIndexInSequence = new Map<string, number>();
+    
+    // 遍历所有 setTransform，找出连续序列（跨批次）
+    let seqStart = 0;
+    while (seqStart < allSetTransforms.length) {
+        // 收集当前连续序列（通过 next 连接，可能跨多个批次）
+        const sequence: TransformData[] = [];
+        let k = seqStart;
+        
+        // 添加序列的第一个
+        sequence.push(allSetTransforms[k]);
+        k++;
+        
+        // 如果前一个有 next，继续收集（包括后续批次的）
+        while (k < allSetTransforms.length) {
+            const prevTransform = allSetTransforms[k - 1];
+            if (prevTransform.type === 'setTransform' && 'next' in prevTransform && prevTransform.next) {
+                sequence.push(allSetTransforms[k]);
+                k++;
+            } else {
+                break;
+            }
         }
         
-        // 处理每个 setTransform，所有都从 time 0 开始（同时播放）
-        for (const setTransform of anim.setTransforms) {
-            // 结束状态：直接使用 setTransform 的 transform（已经是绝对位置）
-            // 不需要合并，因为 setTransform 的 transform 已经是最终状态
+        // 在连续序列中，对于每个 target，找出最后一个 setTransform 的索引
+        // 注意：从后往前遍历，第一次遇到的（即最后一个）会被记录
+        for (let m = sequence.length - 1; m >= 0; m--) {
+            const setTransform = sequence[m];
+            const target = setTransform.target;
+            if (target) {
+                // 计算在整个 allSetTransforms 中的索引
+                const globalIndex = seqStart + m;
+                // 验证索引是否正确：检查索引是否在范围内，并且 target 匹配
+                if (globalIndex < allSetTransforms.length && 
+                    allSetTransforms[globalIndex].target === setTransform.target) {
+                    // 如果该 target 还没有记录，或者当前索引更大，则更新
+                    const existingIndex = targetToLastIndexInSequence.get(target);
+                    if (existingIndex === undefined || globalIndex > existingIndex) {
+                        targetToLastIndexInSequence.set(target, globalIndex);
+                        console.log(`🎬 预处理: target=${target} 在连续序列中的最后一个索引=${globalIndex}, position=${JSON.stringify(setTransform.transform.position)}`);
+                    }
+                } else {
+                    console.warn(`🎬 预处理警告: 索引计算错误！globalIndex=${globalIndex}, target 不匹配`);
+                }
+            }
+        }
+        
+        // 移动到下一个序列（如果最后一个没有 next，下一个序列从这里开始）
+        // 否则，移动到连续序列的末尾
+        seqStart = k;
+    }
+    
+    // 按顺序处理每个 setTransform
+    let currentTime = 0;
+    let i = 0;
+    
+    while (i < allSetTransforms.length) {
+        // 收集当前时间点要同时播放的 setTransform
+        // 第一个 setTransform 总是要播放
+        // 如果第一个有 next，第二个也同时播放
+        // 如果第二个也有 next，第三个也同时播放，以此类推
+        const concurrentSetTransforms: TransformData[] = [];
+        let j = i;
+        
+        // 添加当前要播放的 setTransform（第一个）
+        concurrentSetTransforms.push(allSetTransforms[j]);
+        j++;
+        
+        // 如果前一个 setTransform 有 next，继续收集下一个（同时播放）
+        while (j < allSetTransforms.length) {
+            const prevTransform = allSetTransforms[j - 1];
+            // 只有 setTransform 类型才有 next 属性
+            if (prevTransform.type === 'setTransform' && 'next' in prevTransform && prevTransform.next) {
+                concurrentSetTransforms.push(allSetTransforms[j]);
+                j++;
+            } else {
+                break;
+            }
+        }
+        
+        // 对于同一个 target 的多个同时播放的 setTransform，只保留最后一个
+        // 从后往前遍历，确保最后一个 setTransform 会覆盖前面的
+        const targetToLastSetTransform = new Map<string, TransformData>();
+        for (let k = concurrentSetTransforms.length - 1; k >= 0; k--) {
+            const setTransform = concurrentSetTransforms[k];
+            const target = setTransform.target;
+            if (target && !targetToLastSetTransform.has(target)) {
+                // 从后往前遍历，第一次遇到的（即最后一个）会被保留
+                targetToLastSetTransform.set(target, setTransform);
+            }
+        }
+        
+        // 过滤：只保留那些在连续序列中是最后一个的 setTransform
+        // 如果某个 target 在连续序列中有更后面的 setTransform，跳过当前批次的这个 target
+        const finalTargetToSetTransform = new Map<string, TransformData>();
+        for (const [target, setTransform] of targetToLastSetTransform) {
+            const lastIndexInSequence = targetToLastIndexInSequence.get(target);
+            // 找到 setTransform 在当前批次中的索引
+            // 由于使用了深拷贝，不能使用对象引用比较，需要通过 target 和 position 来匹配
+            let currentIndex = -1;
+            for (let idx = i; idx < j; idx++) {
+                const candidate = allSetTransforms[idx];
+                if (candidate.target === setTransform.target && 
+                    candidate.transform.position?.x === setTransform.transform.position?.x &&
+                    candidate.transform.position?.y === setTransform.transform.position?.y) {
+                    currentIndex = idx;
+                    break;
+                }
+            }
+            
+            console.log(`🎬 检查 target=${target}: currentIndex=${currentIndex}, lastIndexInSequence=${lastIndexInSequence}`);
+            
+            // 如果这个 setTransform 是该 target 在连续序列中的最后一个，才创建动画
+            if (lastIndexInSequence !== undefined && currentIndex === lastIndexInSequence) {
+                // 使用整个序列中的最后一个 transform，而不是批次内的最后一个
+                const lastTransform = allSetTransforms[lastIndexInSequence];
+                console.log(`🎬   ✅ 这是连续序列中的最后一个，创建动画`);
+                console.log(`🎬   从 allSetTransforms[${lastIndexInSequence}] 获取 transform`);
+                console.log(`🎬   实际获取的 transform: target=${lastTransform.target}, position=${JSON.stringify(lastTransform.transform.position)}`);
+                console.log(`🎬   allSetTransforms[${lastIndexInSequence}] === 传入的 setTransform: ${allSetTransforms[lastIndexInSequence] === setTransform}`);
+                finalTargetToSetTransform.set(target, lastTransform);
+            } else if (lastIndexInSequence === undefined) {
+                // 如果 target 不在任何连续序列中（即没有后续的 setTransform），也创建动画
+                console.log(`🎬   ✅ 不在连续序列中，创建动画`);
+                finalTargetToSetTransform.set(target, setTransform);
+            } else {
+                // 否则跳过（在连续序列中不是最后一个）
+                console.log(`🎬   ❌ 跳过（不是连续序列中的最后一个）`);
+            }
+        }
+        
+        console.log(`🎬 批次 ${i}: 收集到 ${concurrentSetTransforms.length} 个同时播放的 setTransform`);
+        console.log(`🎬 批次 ${i}: 去重后 ${finalTargetToSetTransform.size} 个 target（跳过中间动画）`);
+        for (const [target, st] of finalTargetToSetTransform) {
+            console.log(`🎬    target=${target}, position=${JSON.stringify(st.transform.position)}, scale=${JSON.stringify(st.transform.scale)}`);
+        }
+        
+        // 为每个 target 创建动画（只使用最后一个 setTransform）
+        for (const [target, setTransform] of finalTargetToSetTransform) {
+            // 获取当前状态
+            const currentState = targetStates.get(target) || { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } };
+            
+            // 结束状态：直接使用 setTransform 的 transform
             const endState = JSON.parse(JSON.stringify(setTransform.transform));
             
             // 确保 endState 有所有必需的属性
@@ -229,23 +381,46 @@ export function buildAnimationSequence(transforms: TransformData[]): Array<{
             const duration = setTransform.duration || 500;
             const ease = setTransform.ease || 'easeInOut';
             
-            // 深拷贝状态以确保所有属性都被正确保留
-            // 所有动画都从 time 0 开始，实现同时播放
+            console.log(`🎬 创建动画序列项: target=${target}`);
+            console.log(`🎬    startState: ${JSON.stringify(currentState)}`);
+            console.log(`🎬    endState: ${JSON.stringify(endState)}`);
+            console.log(`🎬    duration: ${duration}, startTime: ${currentTime}, endTime: ${currentTime + duration}`);
+            
+            // 创建动画序列项
             animationSequence.push({
-                target: figureID,
+                target: target,
                 duration,
                 ease,
                 startState: JSON.parse(JSON.stringify(currentState)),
                 endState: JSON.parse(JSON.stringify(endState)),
-                startTime: 0, // 所有动画同时开始
-                endTime: duration // 结束时间是持续时间
+                startTime: currentTime,
+                endTime: currentTime + duration
             });
             
-            // 更新当前状态为结束状态（用于同一个 figure 的下一个 setTransform 的起始状态）
-            // 注意：同一个 figure 的多个 setTransform 会共享同一个起始状态（changeFigure 的状态）
-            currentState = endState;
+            // 更新该 target 的状态为结束状态
+            targetStates.set(target, JSON.parse(JSON.stringify(endState)));
         }
-    });
+        
+        // 对于跳过的 target（在连续序列中但不是最后一个），不更新状态
+        // 让最后一个 transform 使用原始状态作为起始状态，直接跳到最终状态
+        // 这样就不会播放中间动画了
+        for (const setTransform of concurrentSetTransforms) {
+            const target = setTransform.target;
+            if (target && !finalTargetToSetTransform.has(target)) {
+                // 这个 target 在当前批次被跳过，不更新状态，让最后的 transform 使用原始状态
+                console.log(`🎬 跳过中间动画，不更新状态: target=${target}, position=${JSON.stringify(setTransform.transform.position)}`);
+            }
+        }
+        
+        // 更新当前时间：使用当前批次中最长的 duration
+        const durations = Array.from(finalTargetToSetTransform.values()).map(st => st.duration || 500);
+        const maxDuration = durations.length > 0 ? Math.max(...durations) : 500;
+        currentTime += maxDuration;
+        
+        // 移动到下一批：如果最后一个 setTransform 没有 next，则下一批从这里开始
+        // 如果最后一个有 next，则下一批从下一个开始
+        i = j;
+    }
     
     return animationSequence;
 }
@@ -397,7 +572,17 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
 
         if (command.startsWith("setTransform:")) {
             const jsonStr = command.replace("setTransform:", "").trim();
-            const params = Object.fromEntries(rest.map(s => s.split("=").map(v => v.trim())));
+            // 解析参数，支持 -next 等无值参数
+            const params: Record<string, string> = {};
+            for (const part of rest) {
+                const [k, v] = part.split("=").map((s) => s?.trim());
+                if (k && v) {
+                    params[k] = v;
+                } else if (k && !v) {
+                    // 支持 -next 等无值参数
+                    params[k] = "";
+                }
+            }
 
             const json = JSON.parse(jsonStr);
             const target = params.target;
@@ -446,15 +631,20 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
                 }
             }
 
-            // 更新 target 的状态
-            targetStates.set(target, transform);
+            // 更新 target 的状态（使用深拷贝，避免引用问题）
+            targetStates.set(target, JSON.parse(JSON.stringify(transform)));
 
+            // 解析 next 参数：如果存在 -next 参数（无论是否有值），next 为 true
+            const next = "next" in params;
+
+            // 返回时也使用深拷贝，确保每个 setTransform 都有独立的 transform 对象
             return {
                 type: "setTransform",
                 target: target,
                 duration: parseInt(params.duration || "500"),
-                transform,
-                ease: params.ease
+                transform: JSON.parse(JSON.stringify(transform)),
+                ease: params.ease,
+                next: next
             };
         }
 

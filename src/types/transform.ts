@@ -1,5 +1,6 @@
-export interface TransformData {
-    type: 'setTransform' | 'changeFigure'| 'changeBg' | 'rawText';
+// 基础 TransformData 接口（不包含 next）
+interface BaseTransformData {
+    type: 'changeFigure' | 'changeBg' | 'rawText';
     target: string;
     duration: number;
     transform: {
@@ -18,3 +19,13 @@ export interface TransformData {
     // 保存无法解析的原始文本
     rawText?: string;
 }
+
+// setTransform 类型，包含 next 参数
+interface SetTransformData extends Omit<BaseTransformData, 'type'> {
+    type: 'setTransform';
+    // next 参数，只对 setTransform 生效
+    next?: boolean;
+}
+
+// 联合类型：所有 TransformData 类型
+export type TransformData = BaseTransformData | SetTransformData;
