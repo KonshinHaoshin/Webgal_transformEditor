@@ -1,0 +1,241 @@
+import { useEffect, useState, useRef } from 'react';
+import { listen, emit } from '@tauri-apps/api/event';
+import { TransformData } from './types/transform';
+import { parseScript, applyFigureIDSystem } from './utils/transformParser';
+
+export default function ScriptOutputWindow() {
+  const [outputScriptLines, setOutputScriptLines] = useState<string[]>([]);
+  const [transforms, setTransforms] = useState<TransformData[]>([]);
+  const [scaleX, setScaleX] = useState(1);
+  const [scaleY, setScaleY] = useState(1);
+  const [selectedGameFolder, setSelectedGameFolder] = useState<string | null>(null);
+  const isReceivingUpdateRef = useRef(false); // 标记是否正在接收来自主窗口的更新
+  const isInitializedRef = useRef(false); // 标记是否已经初始化（接收过第一次数据）
+
+  // 调整 textarea 高度
+  const adjustTextareaHeight = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  };
+
+  // 监听来自主窗口的数据更新事件
+  useEffect(() => {
+    const setupListener = async () => {
+      const unlistenUpdate = await listen<{
+        outputScriptLines: string[];
+        transforms: TransformData[];
+        scaleX: number;
+        scaleY: number;
+        canvasWidth: number;
+        canvasHeight: number;
+        baseWidth: number;
+        baseHeight: number;
+        exportDuration: number;
+        ease: string;
+        selectedGameFolder: string | null;
+      }>('script-output:update-data', (event) => {
+        // 检查数据有效性
+        if (event.payload && Array.isArray(event.payload.outputScriptLines)) {
+          isReceivingUpdateRef.current = true; // 标记正在接收更新
+          setOutputScriptLines(event.payload.outputScriptLines);
+          setTransforms(event.payload.transforms || []);
+          setScaleX(event.payload.scaleX || 1);
+          setScaleY(event.payload.scaleY || 1);
+          setSelectedGameFolder(event.payload.selectedGameFolder || null);
+          isInitializedRef.current = true; // 标记已初始化
+          // 重置标记
+          setTimeout(() => {
+            isReceivingUpdateRef.current = false;
+          }, 100);
+        } else {
+          console.warn('接收到无效的更新数据:', event.payload);
+        }
+      });
+
+      return unlistenUpdate;
+    };
+
+    let unlistenFn: (() => void) | null = null;
+    setupListener().then(fn => {
+      unlistenFn = fn;
+    });
+
+    return () => {
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
+  }, []);
+
+  // 处理 output script 编辑
+  const handleOutputScriptChange = async (newScript: string) => {
+    // 如果正在接收更新，不处理本地编辑
+    if (isReceivingUpdateRef.current || !isInitializedRef.current) {
+      return;
+    }
+
+    const lines = newScript.split('\n').filter(line => line.trim().length > 0);
+    setOutputScriptLines(lines);
+    
+    // 解析并更新 transforms
+    try {
+      const parsed = parseScript(newScript, scaleX, scaleY).map((t) => {
+        const { __presetApplied, ...rest } = t as any;
+        return rest;
+      });
+      
+      const merged = applyFigureIDSystem(parsed);
+      
+      // 注意：脚本输出窗口不负责加载图片，这应该由主窗口处理
+      // 我们只需要通知主窗口 transforms 已更新
+      
+      setTransforms(merged);
+      
+      // 通知主窗口 transforms 已更新
+      emit('script-output:transforms-changed', {
+        transforms: merged
+      }).catch(() => {
+        // 忽略错误
+      });
+    } catch (error) {
+      console.error("❌ 解析 output script 失败:", error);
+    }
+  };
+
+  // 删除指定行
+  const handleDeleteLine = (index: number) => {
+    const newLines = outputScriptLines.filter((_, i) => i !== index);
+    const newScript = newLines.join('\n');
+    handleOutputScriptChange(newScript);
+  };
+
+  // 复制脚本
+  const handleCopyScript = () => {
+    const script = outputScriptLines.join('\n');
+    navigator.clipboard.writeText(script);
+    alert("Script copied!");
+  };
+
+  return (
+    <div style={{ 
+      width: '100%', 
+      height: '100vh', 
+      overflow: 'auto',
+      padding: '16px',
+      backgroundColor: '#ffffff'
+    }}>
+      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>
+          📝 输出脚本
+        </h2>
+        <button
+          onClick={handleCopyScript}
+          style={{
+            padding: '8px 16px',
+            fontSize: '14px',
+            backgroundColor: '#007bff',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: 'bold'
+          }}
+        >
+          复制脚本
+        </button>
+      </div>
+      
+      <div style={{ 
+        border: '1px solid #ccc', 
+        borderRadius: '4px', 
+        padding: '10px', 
+        backgroundColor: '#f9f9f9',
+        maxHeight: 'calc(100vh - 100px)',
+        overflowY: 'auto'
+      }}>
+        {outputScriptLines.length > 0 ? (
+          outputScriptLines.map((line, index) => (
+            <div 
+              key={index} 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                marginBottom: '4px',
+                padding: '4px',
+                backgroundColor: '#fff',
+                borderRadius: '3px',
+                border: '1px solid #e0e0e0'
+              }}
+            >
+              <textarea
+                ref={(el) => adjustTextareaHeight(el)}
+                value={line}
+                onChange={(e) => {
+                  const el = e.target as HTMLTextAreaElement;
+                  adjustTextareaHeight(el);
+                  const newLines = [...outputScriptLines];
+                  newLines[index] = e.target.value;
+                  // 仅更新本地行状态，不立即解析应用
+                  setOutputScriptLines(newLines);
+                }}
+                style={{
+                  flex: 1,
+                  padding: '2px 4px',
+                  fontSize: '13px',
+                  fontFamily: 'monospace',
+                  border: 'none',
+                  outline: 'none',
+                  resize: 'none',
+                  height: 'auto',
+                  minHeight: '20px',
+                  lineHeight: '16px',
+                  overflowY: 'hidden',
+                  backgroundColor: 'transparent',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all'
+                }}
+                rows={1}
+                placeholder={`脚本行 ${index + 1}`}
+                aria-label={`脚本行 ${index + 1}`}
+                onKeyDown={(e) => {
+                  // Enter 提交；Shift+Enter 插入换行
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleOutputScriptChange(outputScriptLines.join('\n'));
+                  } else if (e.key === 'Enter' && e.shiftKey) {
+                    e.preventDefault();
+                    const newLines = [...outputScriptLines];
+                    newLines[index] = (newLines[index] || '') + '\n';
+                    setOutputScriptLines(newLines);
+                  }
+                }}
+                onBlur={() => handleOutputScriptChange(outputScriptLines.join('\n'))}
+              />
+              <button
+                onClick={() => handleDeleteLine(index)}
+                style={{
+                  marginLeft: '8px',
+                  padding: '4px 8px',
+                  fontSize: '12px',
+                  backgroundColor: '#ff4444',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+                title="删除这一行"
+              >
+                ×
+              </button>
+            </div>
+          ))
+        ) : (
+          <div style={{ color: '#999', fontStyle: 'italic' }}>暂无输出脚本</div>
+        )}
+      </div>
+    </div>
+  );
+}
+

@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "filter-editor"],
+  "windows": ["main", "filter-editor", "script-output"],
   "permissions": [
     "core:default",
     "opener:default",
@@ -19,6 +19,8 @@
     "dialog:default",
     "core:window:default",
     "core:window:allow-start-dragging",
+    "core:event:allow-listen",
+    "core:event:allow-emit",
     {
       "identifier": "fs:scope",
       "allow": ["**/*"]

@@ -24,6 +24,10 @@ export default function RotationPanel({
 
             {selectedIndexes.map((index) => {
                 const t = transforms[index];
+                // 安全检查：如果索引无效或 transform 不存在，跳过渲染
+                if (!t || !t.transform) {
+                    return null;
+                }
                 const rotation = t.transform.rotation || 0;
 
                 return (
@@ -92,6 +96,10 @@ export default function RotationPanel({
             
             {selectedIndexes.map((index) => {
                 const t = transforms[index];
+                // 安全检查：如果索引无效或 transform 不存在，跳过渲染
+                if (!t || !t.transform) {
+                    return null;
+                }
                 const scaleX = t.transform.scale?.x || 1;
                 const scaleY = t.transform.scale?.y || 1;
 
