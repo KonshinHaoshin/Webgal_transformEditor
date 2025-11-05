@@ -476,13 +476,6 @@ export default function TransformEditor() {
       return JSON.parse(JSON.stringify(t));
     });
 
-    // 调试：打印 transforms 数组中的 setTransform
-    console.log("🎬 原始 transforms 数组中的 setTransform:");
-    transforms.forEach((t, idx) => {
-      if (t.type === 'setTransform') {
-        console.log(`🎬   索引 ${idx}: target=${t.target}, position=${JSON.stringify(t.transform.position)}`);
-      }
-    });
 
     // 使用新的动画序列构建函数
     // 使用包含原始值的 transforms 来构建动画序列
@@ -690,18 +683,35 @@ export default function TransformEditor() {
           }
         }
       
+        // 确保 startState 和 endState 都有必需的属性
+        const startPosition = startState.position || { x: 0, y: 0 };
+        const endPosition = endState.position || { x: 0, y: 0 };
+        const startScale = startState.scale || { x: 1, y: 1 };
+        const endScale = endState.scale || { x: 1, y: 1 };
+
+        // 调试：打印 scale 信息
+        if (target === 'bg-main') {
+          console.log(`🎬 动画插值 target=${target}: progress=${easedProgress.toFixed(3)}`);
+          console.log(`🎬   startScale: ${JSON.stringify(startScale)}, endScale: ${JSON.stringify(endScale)}`);
+        }
+
         // 插值计算当前位置
         const currentPosition = {
-          x: startState.position.x + (endState.position.x - startState.position.x) * easedProgress,
-          y: startState.position.y + (endState.position.y - startState.position.y) * easedProgress
+          x: startPosition.x + (endPosition.x - startPosition.x) * easedProgress,
+          y: startPosition.y + (endPosition.y - startPosition.y) * easedProgress
         };
         
         // 插值计算当前缩放
         const currentScale = {
-          x: startState.scale.x + (endState.scale.x - startState.scale.x) * easedProgress,
-          y: startState.scale.y + (endState.scale.y - startState.scale.y) * easedProgress
+          x: startScale.x + (endScale.x - startScale.x) * easedProgress,
+          y: startScale.y + (endScale.y - startScale.y) * easedProgress
         };
         
+        // 调试：打印计算结果
+        if (target === 'bg-main') {
+          console.log(`🎬   计算出的 currentScale: ${JSON.stringify(currentScale)}`);
+        }
+
         // 插值计算当前旋转
         const currentRotation = (startState.rotation || 0) + ((endState.rotation || 0) - (startState.rotation || 0)) * easedProgress;
         

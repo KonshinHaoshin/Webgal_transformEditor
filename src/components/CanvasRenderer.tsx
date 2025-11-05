@@ -504,12 +504,8 @@ export default function CanvasRenderer(props: Props) {
                 baseX = canvasWidth / 2;
                 baseY = canvasHeight / 2;
                 
-                // 背景的 scale 应该应用在铺满后的尺寸上
-                // 确保即使有用户设置的 scale，背景也能正确铺满
-                if (transformToUse.scale) {
-                    drawW *= (transformToUse.scale.x || 1);
-                    drawH *= (transformToUse.scale.y || 1);
-                }
+                // 背景的 scale 通过 container.scale 应用，和立绘一样
+                // 不再修改 sprite 的宽度和高度
             } else {
                 // 立绘：按 addFigure 等比适配（contain）
                 // 使用实际渲染的图片尺寸
@@ -577,12 +573,8 @@ export default function CanvasRenderer(props: Props) {
             container.x = baseX + px;
             container.y = baseY + py;
             container.rotation = transformToUse.rotation || 0;
-            // 注意：对于背景，scale 已经应用在 drawW/drawH 上，所以这里设为 1
-            if (isBg) {
-                container.scale.set(1, 1);
-            } else {
-                container.scale.set(transformToUse.scale?.x || 1, transformToUse.scale?.y || 1);
-            }
+            // 背景和立绘都使用 container.scale 来应用缩放
+            container.scale.set(transformToUse.scale?.x || 1, transformToUse.scale?.y || 1);
 
 
             // 💡 设置滤镜字段（由 PixiContainer 实现）
@@ -957,11 +949,16 @@ export default function CanvasRenderer(props: Props) {
             // 遍历所有动画状态，直接更新 Pixi 对象
             animationState.forEach((transform, target) => {
                 const container = spriteMap.current[target];
-                if (!container) return;
+                if (!container) {
+                    // 调试：如果容器不存在，打印警告
+                    if (target === 'bg-main') {
+                        console.log(`🎬 ⚠️ 动画更新 bg-main: 容器不存在`);
+                    }
+                    return;
+                }
                 
                 const baseX = (container as any)._baseX ?? canvasWidth / 2;
                 const baseY = (container as any)._baseY ?? canvasHeight / 2;
-                const isBg = (container as any)._isBg ?? false;
                 
                 // 更新 position
                 if (transform.position) {
@@ -976,12 +973,23 @@ export default function CanvasRenderer(props: Props) {
                     container.rotation = transform.rotation ?? 0;
                 }
                 
-                // 更新 scale
+                // 更新 scale（背景和立绘都使用 container.scale）
+                // 确保 scale 总是被更新，即使 transform.scale 不存在
                 if (transform.scale) {
-                    if (isBg) {
-                        container.scale.set(1, 1);
-                    } else {
-                        container.scale.set(transform.scale.x ?? 1, transform.scale.y ?? 1);
+                    const newScaleX = transform.scale.x ?? 1;
+                    const newScaleY = transform.scale.y ?? 1;
+                    // 强制更新 scale（即使值相同，也调用 set 以确保更新）
+                    container.scale.set(newScaleX, newScaleY);
+                    // 调试：打印背景的 scale 更新
+                    if (target === 'bg-main') {
+                        console.log(`🎬 动画更新 bg-main scale: ${JSON.stringify(transform.scale)}, container.scale: (${container.scale.x}, ${container.scale.y}), newScale: (${newScaleX}, ${newScaleY})`);
+                    }
+                } else {
+                    // 如果没有 scale，设置为默认值
+                    container.scale.set(1, 1);
+                    if (target === 'bg-main') {
+                        console.log(`🎬 ⚠️ 动画更新 bg-main: transform.scale 不存在，使用默认值 (1, 1)`);
+                        console.log(`🎬   transform 内容: ${JSON.stringify(transform)}`);
                     }
                 }
                 
