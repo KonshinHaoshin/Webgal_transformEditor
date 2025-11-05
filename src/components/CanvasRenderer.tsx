@@ -72,6 +72,16 @@ export default function CanvasRenderer(props: Props) {
         return (t as any).presetPosition || (t as any).extraParams?.preset || 'center';
     }
 
+    // 辅助函数：从后往前查找最后一个 setTransform（针对某个 target）
+    function findLastSetTransform(transforms: TransformData[], target: string): number {
+        for (let i = transforms.length - 1; i >= 0; i--) {
+            if (transforms[i].type === "setTransform" && transforms[i].target === target) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
 
     useEffect(() => {
         if (!canvasRef.current) return;
@@ -179,9 +189,7 @@ export default function CanvasRenderer(props: Props) {
                                     
                                     // 如果选中的是 changeFigure/changeBg，也需要更新对应的 setTransform（如果有）
                                     if ((selectedObj.type === 'changeFigure' || selectedObj.type === 'changeBg')) {
-                                        const setTransformIdx = copy.findIndex(
-                                            t => t.type === 'setTransform' && t.target === selectedObj.target
-                                        );
+                                        const setTransformIdx = findLastSetTransform(copy, selectedObj.target);
                                         if (setTransformIdx !== -1) {
                                             // 如果 scale 不存在，先创建它
                                             if (!copy[setTransformIdx].transform.scale) {
@@ -212,9 +220,7 @@ export default function CanvasRenderer(props: Props) {
                             }
                             // 如果这是 changeFigure/changeBg，也需要更新对应的 setTransform（如果有）
                             if ((obj.type === 'changeFigure' || obj.type === 'changeBg')) {
-                                const setTransformIdx = copy.findIndex(
-                                    t => t.type === 'setTransform' && t.target === obj.target
-                                );
+                                const setTransformIdx = findLastSetTransform(copy, obj.target);
                                 if (setTransformIdx !== -1) {
                                     // 如果 scale 不存在，先创建它
                                     if (!copy[setTransformIdx].transform.scale) {
@@ -249,9 +255,7 @@ export default function CanvasRenderer(props: Props) {
                             
                             // 如果选中的是 changeFigure/changeBg，也需要更新对应的 setTransform（如果有）
                             if ((selectedObj.type === 'changeFigure' || selectedObj.type === 'changeBg')) {
-                                const setTransformIdx = copy.findIndex(
-                                    t => t.type === 'setTransform' && t.target === selectedObj.target
-                                );
+                                const setTransformIdx = findLastSetTransform(copy, selectedObj.target);
                                 if (setTransformIdx !== -1) {
                                     // 如果 scale 不存在，先创建它
                                     if (!copy[setTransformIdx].transform.scale) {
@@ -291,69 +295,101 @@ export default function CanvasRenderer(props: Props) {
         spriteMap.current = {};
 
         // 构建 target 到 setTransform 的映射（使用最后一个 setTransform）
+        // 从后往前遍历，确保保存的是最后一个 setTransform
         const setTransformMap = new Map<string, TransformData>();
-        transforms.forEach((t) => {
-            if (t.type === "setTransform" && t.target) {
+        for (let i = transforms.length - 1; i >= 0; i--) {
+            const t = transforms[i];
+            if (t.type === "setTransform" && t.target && !setTransformMap.has(t.target)) {
                 setTransformMap.set(t.target, t);
             }
-        });
+        }
 
-        transforms.forEach((t, index) => {
+        // 构建 target 到 changeFigure/changeBg 的映射（使用最后一个 changeFigure/changeBg）
+        // 从后往前遍历，确保保存的是最后一个 changeFigure/changeBg
+        const changeFigureMap = new Map<string, TransformData>();
+        for (let i = transforms.length - 1; i >= 0; i--) {
+            const t = transforms[i];
+            if ((t.type === "changeFigure" || t.type === "changeBg") && t.target && !changeFigureMap.has(t.target)) {
+                changeFigureMap.set(t.target, t);
+            }
+        }
+
+        // 获取所有需要渲染的 targets（每个 target 只渲染一次，使用最后一个 changeFigure/changeBg）
+        const renderedTargets = new Set<string>();
+        const targetsToRender: TransformData[] = [];
+
+        // 从后往前遍历，找到每个 target 的最后一个 changeFigure/changeBg
+        for (let i = transforms.length - 1; i >= 0; i--) {
+            const t = transforms[i];
+            if ((t.type === "changeFigure" || t.type === "changeBg") && t.target && !renderedTargets.has(t.target)) {
+                renderedTargets.add(t.target);
+                targetsToRender.unshift(t); // 保持顺序，但只保留最后一个
+            }
+        }
+
+        targetsToRender.forEach((t, index) => {
             // 跳过 rawText 类型，不渲染任何内容
             if (t.type === "rawText") {
                 return;
             }
-            
-            // 跳过 setTransform 类型，它们不应该单独渲染（只用于状态计算和导出）
-            if (t.type === "setTransform") {
-                return;
-            }
-            
+
             const container = new PixiContainer();
             const isBg = t.target === "bg-main";
             
-            // 对于立绘和背景，查找对应的 setTransform（如果有的话）
-            let transformToUse = t.transform;
-            if (t.type === "changeFigure" || t.type === "changeBg") {
-                const setTransform = setTransformMap.get(t.target);
-                if (setTransform) {
-                    // 合并 setTransform 和 changeFigure/changeBg 的 transform
-                    // 使用 setTransform 的 position, scale, rotation
-                    // 但如果 setTransform 中缺少滤镜参数，从 changeFigure/changeBg 中继承
-                    const filterKeys = [
-                        "brightness", "contrast", "saturation", "gamma",
-                        "colorRed", "colorGreen", "colorBlue",
-                        "bloom", "bloomBrightness", "bloomBlur", "bloomThreshold",
-                        "bevel", "bevelThickness", "bevelRotation", "bevelSoftness",
-                        "bevelRed", "bevelGreen", "bevelBlue"
-                    ];
-                    
-                    // 合并 transform：只使用 setTransform 中的 position、scale、rotation
-                    // 滤镜参数始终从 changeFigure/changeBg 中获取，不从 setTransform 中获取
-                    transformToUse = {
-                        ...t.transform, // 先使用 changeFigure/changeBg 的 transform（包含滤镜参数）
-                    };
-                    
-                    // 只从 setTransform 中提取 position、scale、rotation（如果存在）
-                    if (setTransform.transform.position !== undefined) {
-                        transformToUse.position = setTransform.transform.position;
-                    }
-                    if (setTransform.transform.scale !== undefined) {
-                        transformToUse.scale = setTransform.transform.scale;
-                    }
-                    if (setTransform.transform.rotation !== undefined) {
-                        transformToUse.rotation = setTransform.transform.rotation;
-                    }
-                    
-                    // 确保滤镜参数不会被 setTransform 覆盖（setTransform 不应该包含滤镜参数）
-                    for (const key of filterKeys) {
-                        if (setTransform.transform[key] !== undefined) {
-                            // 如果 setTransform 中意外包含了滤镜参数，忽略它，使用 changeFigure/changeBg 的值
-                            if (t.transform[key] !== undefined) {
-                                transformToUse[key] = t.transform[key];
-                            }
-                        }
-                    }
+            // 获取该 target 的最后一个 changeFigure/changeBg（从 map 中获取）
+            const lastChangeFigure = changeFigureMap.get(t.target);
+            if (!lastChangeFigure) {
+                return; // 如果没有找到对应的 changeFigure/changeBg，跳过
+            }
+
+            // 获取该 target 的最后一个 setTransform（如果有）
+            const setTransform = setTransformMap.get(t.target);
+
+            // 合并 transform：优先使用最后一个 setTransform，缺失的参数从最后一个 changeFigure/changeBg 继承
+            const filterKeys = [
+                "brightness", "contrast", "saturation", "gamma",
+                "colorRed", "colorGreen", "colorBlue",
+                "bloom", "bloomBrightness", "bloomBlur", "bloomThreshold",
+                "bevel", "bevelThickness", "bevelRotation", "bevelSoftness",
+                "bevelRed", "bevelGreen", "bevelBlue"
+            ];
+
+            // 先使用最后一个 changeFigure/changeBg 的 transform（包含滤镜参数）
+            let transformToUse: any = {
+                ...lastChangeFigure.transform,
+            };
+
+            // 如果有 setTransform，优先使用 setTransform 的 position、scale、rotation（如果存在）
+            if (setTransform && setTransform.transform) {
+                // 从 setTransform 继承 position（如果存在）
+                if (setTransform.transform.position !== undefined) {
+                    transformToUse.position = { ...setTransform.transform.position };
+                } else if (lastChangeFigure.transform.position !== undefined) {
+                    // 如果 setTransform 没有 position，从 changeFigure 继承
+                    transformToUse.position = { ...lastChangeFigure.transform.position };
+                }
+
+                // 从 setTransform 继承 scale（如果存在）
+                if (setTransform.transform.scale !== undefined) {
+                    transformToUse.scale = { ...setTransform.transform.scale };
+                } else if (lastChangeFigure.transform.scale !== undefined) {
+                    // 如果 setTransform 没有 scale，从 changeFigure 继承
+                    transformToUse.scale = { ...lastChangeFigure.transform.scale };
+                }
+
+                // 从 setTransform 继承 rotation（如果存在）
+                if (setTransform.transform.rotation !== undefined) {
+                    transformToUse.rotation = setTransform.transform.rotation;
+                } else if (lastChangeFigure.transform.rotation !== undefined) {
+                    // 如果 setTransform 没有 rotation，从 changeFigure 继承
+                    transformToUse.rotation = lastChangeFigure.transform.rotation;
+                }
+            }
+
+            // 确保滤镜参数始终从 changeFigure/changeBg 中获取
+            for (const key of filterKeys) {
+                if (lastChangeFigure.transform[key] !== undefined) {
+                    transformToUse[key] = lastChangeFigure.transform[key];
                 }
             }
             
@@ -494,8 +530,8 @@ export default function CanvasRenderer(props: Props) {
                     baseY = canvasHeight / 2 + (canvasHeight - targetHNoUser) / 2;
                 }
 
-                // 水平预设位
-                const preset = getPreset(t); // 'left' | 'center' | 'right'
+                // 水平预设位（使用最后一个 changeFigure 的预设位置）
+                const preset = getPreset(lastChangeFigure); // 'left' | 'center' | 'right'
                 const targetWNoUser = imgW * fitScale; // 不含用户缩放的原始适配宽度（基线用）
                 if (preset === 'center') baseX = canvasWidth / 2;
                 if (preset === 'left')   baseX = targetWNoUser / 2;
@@ -599,10 +635,9 @@ export default function CanvasRenderer(props: Props) {
                     initialPositionsRef.current = {};
                     selectedIndexes.forEach(idx => {
                         const targetTransform = transforms[idx];
-                        // 查找对应的 setTransform
-                        const setTransform = transforms.find(
-                            (tr) => tr.type === "setTransform" && tr.target === targetTransform.target
-                        );
+                        // 查找对应的最后一个 setTransform
+                        const setTransformIdx = findLastSetTransform(transforms, targetTransform.target);
+                        const setTransform = setTransformIdx !== -1 ? transforms[setTransformIdx] : null;
                         const transformToUse = setTransform ? setTransform.transform : targetTransform.transform;
                         initialPositionsRef.current[idx] = {
                             x: transformToUse.position?.x ?? 0,
@@ -644,15 +679,13 @@ export default function CanvasRenderer(props: Props) {
                         if (rotatingRef.current) {
                             // 🌀 实时旋转
                             const currentTransform = transforms[i];
-                            // 查找对应的 setTransform（如果有）
-                            const setTransformIdx = transforms.findIndex(
-                                (tr) => tr.type === "setTransform" && tr.target === currentTransform.target
-                            );
-                            
-                            if (setTransformIdx !== -1) {
-                                // 更新 setTransform 的 rotation
-                                setTransforms((prev) => {
-                                    const copy = [...prev];
+                            // 更新 setTransform 的 rotation
+                            setTransforms((prev) => {
+                                const copy = [...prev];
+                                // 查找对应的最后一个 setTransform（如果有）
+                                const setTransformIdx = findLastSetTransform(copy, currentTransform.target);
+
+                                if (setTransformIdx !== -1) {
                                     // 使用 setTransform 的 transform 来计算位置（用于旋转中心）
                                     const setTransform = copy[setTransformIdx];
                                     const cx = centerX + (setTransform.transform.position?.x ?? 0) * scaleX;
@@ -660,25 +693,11 @@ export default function CanvasRenderer(props: Props) {
                                     const angleNow = Math.atan2(localPos.y - cy, localPos.x - cx);
                                     const delta = angleNow - rotationStartAngleRef.current;
                                     copy[setTransformIdx].transform.rotation = initialRotationRef.current + delta;
-                                    return copy;
-                                });
-                            } else {
-                                // 如果没有 setTransform，使用原来的逻辑（不应该发生，但保险起见）
-                                if (!transforms[i].transform.position) {
-                                    return;
                                 }
-                                const cx = centerX + transforms[i].transform.position.x * scaleX;
-                                const cy = centerY + transforms[i].transform.position.y * scaleY;
-                                const angleNow = Math.atan2(localPos.y - cy, localPos.x - cx);
-                                const delta = angleNow - rotationStartAngleRef.current;
-
-                                setTransforms((prev) => {
-                                    const copy = [...prev];
-                                    copy[i].transform.rotation = initialRotationRef.current + delta;
-                                    return copy;
-                                });
-                            }
+                                return copy;
+                            });
                         } else {
+                            // 拖拽逻辑
                             const deltaX = localPos.x - offsetRef.current.x;
                             const deltaY = localPos.y - offsetRef.current.y;
 
@@ -688,38 +707,36 @@ export default function CanvasRenderer(props: Props) {
                                     const initialPos = initialPositionsRef.current[idx];
                                     if (initialPos) {
                                         const targetTransform = prev[idx];
-                                        // 查找对应的 setTransform（如果有）
-                                        const setTransformIdx = copy.findIndex(
-                                            (tr) => tr.type === "setTransform" && tr.target === targetTransform.target
-                                        );
-                                        
-                                        if (setTransformIdx !== -1) {
-                                            // 更新 setTransform 的 position（如果不存在则创建）
-                                            if (!copy[setTransformIdx].transform.position) {
-                                                copy[setTransformIdx].transform.position = { x: 0, y: 0 };
-                                            }
-                                            if (!lockX) {
-                                                copy[setTransformIdx].transform.position.x = initialPos.x + deltaX / scaleX;
-                                            }
-                                            if (!lockY) {
-                                                copy[setTransformIdx].transform.position.y = initialPos.y + deltaY / scaleY;
-                                            }
-                                        } else {
-                                            // 如果没有 setTransform，使用原来的逻辑（不应该发生，但保险起见）
-                                            if (!copy[idx].transform.position) {
-                                                copy[idx].transform.position = { x: 0, y: 0 };
-                                            }
-                                            if (!lockX) {
-                                                copy[idx].transform.position.x = initialPos.x + deltaX / scaleX;
-                                            }
-                                            if (!lockY) {
-                                                copy[idx].transform.position.y = initialPos.y + deltaY / scaleY;
-                                            }
+                                    // 查找对应的最后一个 setTransform（如果有）
+                                    const setTransformIdx = findLastSetTransform(copy, targetTransform.target);
+
+                                    if (setTransformIdx !== -1) {
+                                        // 更新 setTransform 的 position（如果不存在则创建）
+                                        if (!copy[setTransformIdx].transform.position) {
+                                            copy[setTransformIdx].transform.position = { x: 0, y: 0 };
+                                        }
+                                        if (!lockX) {
+                                            copy[setTransformIdx].transform.position.x = initialPos.x + deltaX / scaleX;
+                                        }
+                                        if (!lockY) {
+                                            copy[setTransformIdx].transform.position.y = initialPos.y + deltaY / scaleY;
+                                        }
+                                    } else {
+                                        // 如果没有 setTransform，使用原来的逻辑（不应该发生，但保险起见）
+                                        if (!copy[idx].transform.position) {
+                                            copy[idx].transform.position = { x: 0, y: 0 };
+                                        }
+                                        if (!lockX) {
+                                            copy[idx].transform.position.x = initialPos.x + deltaX / scaleX;
+                                        }
+                                        if (!lockY) {
+                                            copy[idx].transform.position.y = initialPos.y + deltaY / scaleY;
                                         }
                                     }
-                                });
-                                return copy;
+                                }
                             });
+                            return copy;
+                        });
                         }
                     };
 

@@ -1296,22 +1296,8 @@ export default function TransformEditor() {
             targetsToAdd.add("bg-main");
           }
           
-          // 检查哪些 target 还没有对应的 setTransform
-          const existingTargets = new Set(
-            transforms
-              .filter((t) => t.type === "setTransform" && t.target)
-              .map((t) => t.target)
-          );
-          
-          // 只添加还没有 setTransform 的 targets
-          const targetsWithoutSetTransform = Array.from(targetsToAdd).filter(
-            (target) => !existingTargets.has(target)
-          );
-          
-          if (targetsWithoutSetTransform.length === 0) {
-            alert("所有立绘和背景都已存在 setTransform！");
-            return;
-          }
+          // 给所有targets添加setTransform
+          const targetsWithoutSetTransform = Array.from(targetsToAdd);
           
           // 为每个 target 创建新的 setTransform，继承最近的 changeFigure 或 setTransform
           const newItems: TransformData[] = targetsWithoutSetTransform.map((target) => {
