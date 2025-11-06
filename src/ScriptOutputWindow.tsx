@@ -69,6 +69,65 @@ export default function ScriptOutputWindow() {
     };
   }, []);
 
+  // 添加next按钮
+  const [nextLines, setNextLines] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    const linesWithNext = new Set<number>();
+    outputScriptLines.forEach((line, index) => {
+      // 检查每行末尾是否包含"next"
+      const trimmedLine = line.trim();
+      if (/\s-next(\s|;|$)/.test(trimmedLine) || trimmedLine.endsWith(' -next') || trimmedLine.endsWith(' -next;')) {
+        linesWithNext.add(index);
+      }
+    });
+    setNextLines(linesWithNext);
+  }, [outputScriptLines]);
+
+  const toggleNext = (index: number) => {
+    const newLines = [...outputScriptLines];
+    const line = newLines[index];
+    const trimmedLine = line.trim();
+    // 检查是否有next
+    const hasNext = /\s-next(\s|;|$)/.test(trimmedLine) || trimmedLine.endsWith(' -next') || trimmedLine.endsWith(' -next;');
+    if (hasNext) {
+      {
+        let newLine = trimmedLine.replace('-next', '');
+        const endsWithSemicolon = newLine.endsWith(';');
+        if (endsWithSemicolon) {
+          newLine = newLine.slice(0, -1).trim();
+        }
+        if (endsWithSemicolon) {
+          newLine += ';';
+        }
+        newLines[index] = newLine;
+      }
+    } else {
+      //如果没有next
+      let newLine = trimmedLine + ' -next';
+      const endsWithSemicolon = newLine.endsWith(';');
+      if (endsWithSemicolon) {
+        newLine = newLine.slice(0, -1).trim();
+      }
+      if (endsWithSemicolon) {
+        newLine += ';';
+      }
+      newLines[index] = newLine;
+    }
+    setOutputScriptLines(newLines);
+
+    const newNextLines = new Set(nextLines);
+    if (hasNext) {
+      newNextLines.delete(index);
+    } else {
+      newNextLines.add(index);
+    }
+    setNextLines(newNextLines);
+
+
+    handleOutputScriptChange(newLines.join('\n'));
+  };
+
   // 处理 output script 编辑
   const handleOutputScriptChange = async (newScript: string) => {
     // 如果正在接收更新，不处理本地编辑
@@ -210,6 +269,30 @@ export default function ScriptOutputWindow() {
               >
                 {breakpoints.has(index) ? '●' : '○'}
               </button>
+              {/* Next 按钮 */}
+              <button
+                onClick={() => toggleNext(index)}
+                style={{
+                  marginRight: '8px',
+                  padding: '4px 8px',
+                  fontSize: '12px',
+                  backgroundColor: nextLines.has(index) ? '#4caf50' : '#e0e0e0',
+                  color: nextLines.has(index) ? '#fff' : '#666',
+                  border: 'none',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  minWidth: '40px',
+                  height: '24px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                title={nextLines.has(index) ? "移除 -next" : "添加 -next"}
+              >
+                {nextLines.has(index) ? '✓' : 'next'}
+              </button>
+
               <textarea
                 ref={(el) => adjustTextareaHeight(el)}
                 value={line}
