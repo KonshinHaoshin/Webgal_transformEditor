@@ -177,6 +177,16 @@ export default function ScriptOutputWindow() {
     alert("Script copied!");
   };
 
+  const handleCopySetTransformOnly = () => {
+    const setTransformLines = outputScriptLines.filter((line) => line.trim().startsWith('setTransform'));
+    if (setTransformLines.length === 0) {
+      alert("没有setTransform行");
+      return;
+    }
+    const setTransformScript = setTransformLines.join('\n');
+    navigator.clipboard.writeText(setTransformScript);
+  };
+
   // 切换断点状态
   const toggleBreakpoint = (index: number) => {
     const newBreakpoints = new Set(breakpoints);
@@ -207,23 +217,40 @@ export default function ScriptOutputWindow() {
         <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>
           📝 输出脚本
         </h2>
-        <button
-          onClick={handleCopyScript}
-          style={{
-            padding: '8px 16px',
-            fontSize: '14px',
-            backgroundColor: '#007bff',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontWeight: 'bold'
-          }}
-        >
-          复制脚本
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            onClick={handleCopyScript}
+            style={{
+              padding: '8px 16px',
+              fontSize: '14px',
+              backgroundColor: '#007bff',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            复制脚本
+          </button>
+          <button
+            onClick={handleCopySetTransformOnly}
+            style={{
+              padding: '8px 16px',
+              fontSize: '14px',
+              backgroundColor: '#28a745',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+            title="只复制 setTransform 命令"
+          >
+            只复制setTransform语句
+          </button>
+        </div>
       </div>
-      
       <div style={{ 
         border: '1px solid #ccc', 
         borderRadius: '4px', 
@@ -274,25 +301,25 @@ export default function ScriptOutputWindow() {
                 onClick={() => toggleNext(index)}
                 style={{
                   marginRight: '8px',
-                  padding: '4px 8px',
-                  fontSize: '12px',
+                  padding: '2px 4px',
+                  fontSize: '10px',
                   backgroundColor: nextLines.has(index) ? '#4caf50' : '#e0e0e0',
                   color: nextLines.has(index) ? '#fff' : '#666',
                   border: 'none',
                   borderRadius: '3px',
                   cursor: 'pointer',
                   fontWeight: 'bold',
-                  minWidth: '40px',
-                  height: '24px',
+                  minWidth: '20px',
+                  width: '20px',
+                  height: '20px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center'
                 }}
                 title={nextLines.has(index) ? "移除 -next" : "添加 -next"}
               >
-                {nextLines.has(index) ? '✓' : 'next'}
+                {nextLines.has(index) ? '✓' : 'N'}
               </button>
-
               <textarea
                 ref={(el) => adjustTextareaHeight(el)}
                 value={line}
