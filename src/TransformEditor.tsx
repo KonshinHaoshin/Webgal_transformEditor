@@ -1288,8 +1288,28 @@ export default function TransformEditor() {
       // 但在最后一次确认后，需要允许更新以确保 transforms 和 outputScriptLines 同步
       return;
     }
-    // 如果有断点，不更新 outputScriptLines（保持完整脚本）
+    // 如果有断点，需要更新完整脚本（fullOutputScriptLinesRef）
+    // 但保持 outputScriptLines 不变（只显示到断点位置）
     if (breakpoints.size > 0) {
+      if (Array.isArray(transforms) && fullOutputScriptLinesRef.current.length > 0) {
+        try {
+          // 从 transforms 重新生成脚本（只包含断点之前的内容）
+          const script = exportScript(transforms, exportDuration, canvasWidth, canvasHeight, baseWidth, baseHeight, ease === "default" ? undefined : ease);
+          const lines = script.split('\n').filter(line => line.trim().length > 0);
+          
+          // 更新完整脚本：将断点之前的部分替换为新生成的脚本，保留断点之后的部分
+          const minBreakpointIndex = Math.min(...Array.from(breakpoints));
+          const newFullScriptLines = [...fullOutputScriptLinesRef.current];
+          // 替换断点之前的部分
+          newFullScriptLines.splice(0, minBreakpointIndex + 1, ...lines);
+          fullOutputScriptLinesRef.current = newFullScriptLines;
+          
+          // 更新 outputScriptLines（只显示到断点位置）
+          setOutputScriptLines(newFullScriptLines.slice(0, minBreakpointIndex + 1));
+        } catch (error) {
+          console.error("❌ 同步 transforms 到 outputScript 失败:", error);
+        }
+      }
       return;
     }
     if (Array.isArray(transforms)) {
@@ -2065,6 +2085,9 @@ export default function TransformEditor() {
           enabledTargetsArray={Array.from(enabledTargets)}
           showSelectionBox={showSelectionBox}
           showTargetId={showTargetId}
+          breakpoints={breakpoints}
+          fullOutputScriptLines={fullOutputScriptLinesRef.current}
+          outputScriptLines={outputScriptLines}
         />
       </div>
 

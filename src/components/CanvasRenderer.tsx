@@ -30,6 +30,9 @@ interface Props {
     showSelectionBox?: boolean; // 是否显示蓝色框选框
     showTargetId?: boolean; // 是否显示角色ID
     animationStateRef?: React.MutableRefObject<Map<string, any> | null>; // 动画状态 ref（用于性能优化）
+    breakpoints?: Set<number>; // 断点行索引集合
+    fullOutputScriptLines?: string[]; // 完整的输出脚本行（不受断点影响）
+    outputScriptLines?: string[]; // 当前的输出脚本行
 }
 
 export default function CanvasRenderer(props: Props) {
@@ -46,7 +49,10 @@ export default function CanvasRenderer(props: Props) {
         enabledTargetsArray = [],
         showSelectionBox = true,
         showTargetId = true,
-        animationStateRef
+        animationStateRef,
+        breakpoints = new Set(),
+        fullOutputScriptLines = [],
+        outputScriptLines = []
     } = props;
 
     const appRef = useRef<PIXI.Application | null>(null);
@@ -80,6 +86,26 @@ export default function CanvasRenderer(props: Props) {
             }
         }
         return -1;
+    }
+
+    // 辅助函数：查找某个 target 在断点之前的所有 setTransform 索引
+    function findAllSetTransformsBeforeBreakpoint(transforms: TransformData[], target: string, hasBreakpoint: boolean): number[] {
+        const indices: number[] = [];
+        if (hasBreakpoint) {
+            // 如果有断点，transforms 中所有的 setTransform 都应该被更新（因为它们都在断点之前）
+            for (let i = 0; i < transforms.length; i++) {
+                if (transforms[i].type === "setTransform" && transforms[i].target === target) {
+                    indices.push(i);
+                }
+            }
+        } else {
+            // 如果没有断点，只更新最后一个
+            const lastIdx = findLastSetTransform(transforms, target);
+            if (lastIdx !== -1) {
+                indices.push(lastIdx);
+            }
+        }
+        return indices;
     }
 
 
@@ -670,20 +696,26 @@ export default function CanvasRenderer(props: Props) {
                         if (rotatingRef.current) {
                             // 🌀 实时旋转
                             const currentTransform = transforms[i];
+                            // 检查是否有断点
+                            const hasBreakpoint = breakpoints.size > 0;
                             // 更新 setTransform 的 rotation
                             setTransforms((prev) => {
                                 const copy = [...prev];
-                                // 查找对应的最后一个 setTransform（如果有）
-                                const setTransformIdx = findLastSetTransform(copy, currentTransform.target);
+                                // 查找该 target 在断点之前的所有 setTransform（如果有断点）
+                                // 或者只查找最后一个 setTransform（如果没有断点）
+                                const setTransformIndices = findAllSetTransformsBeforeBreakpoint(copy, currentTransform.target, hasBreakpoint);
 
-                                if (setTransformIdx !== -1) {
-                                    // 使用 setTransform 的 transform 来计算位置（用于旋转中心）
-                                    const setTransform = copy[setTransformIdx];
+                                if (setTransformIndices.length > 0) {
+                                    // 使用第一个 setTransform 的 transform 来计算位置（用于旋转中心）
+                                    const setTransform = copy[setTransformIndices[0]];
                                     const cx = centerX + (setTransform.transform.position?.x ?? 0) * scaleX;
                                     const cy = centerY + (setTransform.transform.position?.y ?? 0) * scaleY;
                                     const angleNow = Math.atan2(localPos.y - cy, localPos.x - cx);
                                     const delta = angleNow - rotationStartAngleRef.current;
-                                    copy[setTransformIdx].transform.rotation = initialRotationRef.current + delta;
+                                    // 更新所有相关的 setTransform 的 rotation
+                                    setTransformIndices.forEach((setTransformIdx) => {
+                                        copy[setTransformIdx].transform.rotation = initialRotationRef.current + delta;
+                                    });
                                 }
                                 return copy;
                             });
@@ -692,26 +724,33 @@ export default function CanvasRenderer(props: Props) {
                             const deltaX = localPos.x - offsetRef.current.x;
                             const deltaY = localPos.y - offsetRef.current.y;
 
+                            // 检查是否有断点
+                            const hasBreakpoint = breakpoints.size > 0;
+
                             setTransforms((prev) => {
                                 const copy = [...prev];
                                 selectedIndexes.forEach((idx) => {
                                     const initialPos = initialPositionsRef.current[idx];
                                     if (initialPos) {
                                         const targetTransform = prev[idx];
-                                        // 查找对应的最后一个 setTransform（如果有）
-                                        const setTransformIdx = findLastSetTransform(copy, targetTransform.target);
+                                        // 查找该 target 在断点之前的所有 setTransform（如果有断点）
+                                        // 或者只查找最后一个 setTransform（如果没有断点）
+                                        const setTransformIndices = findAllSetTransformsBeforeBreakpoint(copy, targetTransform.target, hasBreakpoint);
 
-                                        if (setTransformIdx !== -1) {
-                                            // 更新 setTransform 的 position（如果不存在则创建）
-                                            if (!copy[setTransformIdx].transform.position) {
-                                                copy[setTransformIdx].transform.position = { x: 0, y: 0 };
-                                            }
-                                            if (!lockX) {
-                                                copy[setTransformIdx].transform.position.x = initialPos.x + deltaX / scaleX;
-                                            }
-                                            if (!lockY) {
-                                                copy[setTransformIdx].transform.position.y = initialPos.y + deltaY / scaleY;
-                                            }
+                                        if (setTransformIndices.length > 0) {
+                                            // 更新所有相关的 setTransform 的 position
+                                            setTransformIndices.forEach((setTransformIdx) => {
+                                                // 更新 setTransform 的 position（如果不存在则创建）
+                                                if (!copy[setTransformIdx].transform.position) {
+                                                    copy[setTransformIdx].transform.position = { x: 0, y: 0 };
+                                                }
+                                                if (!lockX) {
+                                                    copy[setTransformIdx].transform.position.x = initialPos.x + deltaX / scaleX;
+                                                }
+                                                if (!lockY) {
+                                                    copy[setTransformIdx].transform.position.y = initialPos.y + deltaY / scaleY;
+                                                }
+                                            });
                                         } else {
                                             // 如果没有 setTransform，使用原来的逻辑（不应该发生，但保险起见）
                                             if (!copy[idx].transform.position) {
