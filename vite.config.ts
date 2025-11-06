@@ -11,7 +11,8 @@ export default defineConfig({
         rollupOptions: {
             input: {
                 main: './index.html',
-                'filter-editor': './filter-editor.html'
+                'filter-editor': './filter-editor.html',
+                'script-output': './script-output.html'
             }
         }
     },
