@@ -50,9 +50,8 @@ export default function CanvasRenderer(props: Props) {
         showSelectionBox = true,
         showTargetId = true,
         animationStateRef,
-        breakpoints = new Set(),
-        fullOutputScriptLines = [],
-        outputScriptLines = []
+        breakpoints = new Set()
+        // fullOutputScriptLines 和 outputScriptLines 暂时未使用，但保留在 Props 接口中以便将来使用
     } = props;
 
     const appRef = useRef<PIXI.Application | null>(null);

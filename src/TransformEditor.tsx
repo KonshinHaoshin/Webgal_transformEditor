@@ -1324,39 +1324,8 @@ export default function TransformEditor() {
     }
   }, [transforms, exportDuration, ease, canvasWidth, canvasHeight, baseWidth, baseHeight, isPlaying, breakpoints]);
 
-  // 处理 output script 编辑
-  const handleOutputScriptChange = async (newScript: string) => {
-    const lines = newScript.split('\n').filter(line => line.trim().length > 0);
-    setOutputScriptLines(lines);
-    fullOutputScriptLinesRef.current = lines; // 保存完整脚本
-
-    // 如果有断点，只解析到断点行为止
-    let scriptToParse = newScript;
-    if (breakpoints.size > 0) {
-      const minBreakpointIndex = Math.min(...Array.from(breakpoints));
-      scriptToParse = lines.slice(0, minBreakpointIndex + 1).join('\n');
-    }
-    
-    // 解析并更新 transforms
-    try {
-      const parsed = parseScript(scriptToParse, scaleX, scaleY).map((t) => {
-        const { __presetApplied, ...rest } = t as any;
-        return rest;
-      });
-      
-      const merged = applyFigureIDSystem(parsed);
-      
-      // 如果启用了 WebGAL 模式，自动加载图片
-      if (selectedGameFolder && scriptToParse.trim()) {
-        await parseAndLoadImages(scriptToParse);
-      }
-      
-      setTransforms(merged);
-      setSelectedIndexes([]);
-    } catch (error) {
-      console.error("❌ 解析 output script 失败:", error);
-    }
-  };
+  // 注意：output script 的编辑处理由 ScriptOutputWindow 组件通过事件系统处理
+  // 脚本输出窗口会发送 'script-output:transforms-changed' 事件，主窗口监听该事件并更新 transforms
 
 
 

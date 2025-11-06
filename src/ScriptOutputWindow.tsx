@@ -5,10 +5,10 @@ import { parseScript, applyFigureIDSystem } from './utils/transformParser';
 
 export default function ScriptOutputWindow() {
   const [outputScriptLines, setOutputScriptLines] = useState<string[]>([]);
-  const [transforms, setTransforms] = useState<TransformData[]>([]);
+  const [, setTransforms] = useState<TransformData[]>([]); // 只用于设置，不读取
   const [scaleX, setScaleX] = useState(1);
   const [scaleY, setScaleY] = useState(1);
-  const [selectedGameFolder, setSelectedGameFolder] = useState<string | null>(null);
+  const [, setSelectedGameFolder] = useState<string | null>(null); // 只用于设置，不读取
   const [breakpoints, setBreakpoints] = useState<Set<number>>(new Set()); // 断点行索引集合
   const isReceivingUpdateRef = useRef(false); // 标记是否正在接收来自主窗口的更新
   const isInitializedRef = useRef(false); // 标记是否已经初始化（接收过第一次数据）
