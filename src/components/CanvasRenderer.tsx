@@ -33,6 +33,7 @@ interface Props {
     breakpoints?: Set<number>; // 断点行索引集合
     fullOutputScriptLines?: string[]; // 完整的输出脚本行（不受断点影响）
     outputScriptLines?: string[]; // 当前的输出脚本行
+    mygo3Mode?: boolean; // MyGO!!!!! 3.0 模式
 }
 
 export default function CanvasRenderer(props: Props) {
@@ -50,7 +51,8 @@ export default function CanvasRenderer(props: Props) {
         showSelectionBox = true,
         showTargetId = true,
         animationStateRef,
-        breakpoints = new Set()
+        breakpoints = new Set(),
+        mygo3Mode = false
         // fullOutputScriptLines 和 outputScriptLines 暂时未使用，但保留在 Props 接口中以便将来使用
     } = props;
 
@@ -715,7 +717,16 @@ export default function CanvasRenderer(props: Props) {
                 const imgW = imgWidth || 1;
                 const imgH = imgHeight || 1;
 
-                const fitScale = Math.min(canvasWidth / imgW, canvasHeight / imgH);
+                const pathLower = (t.path || "").toLowerCase();
+                const isMygoLive2D =
+                    mygo3Mode &&
+                    pathLower.endsWith(".json");
+
+                let fitScale = Math.min(canvasWidth / imgW, canvasHeight / imgH);
+
+                if (isMygoLive2D) {
+                    fitScale *= 1.25;
+                }
                 
                 // drawW/drawH 只使用 fitScale，用户缩放通过 container.scale 应用
                 drawW = imgW * fitScale;
@@ -732,9 +743,20 @@ export default function CanvasRenderer(props: Props) {
                 // 水平预设位（使用最后一个 changeFigure 的预设位置）
                 const preset = getPreset(lastChangeFigure); // 'left' | 'center' | 'right'
                 const targetWNoUser = imgW * fitScale; // 不含用户缩放的原始适配宽度（基线用）
-                if (preset === 'center') baseX = canvasWidth / 2;
-                if (preset === 'left')   baseX = targetWNoUser / 2;
-                if (preset === 'right')  baseX = canvasWidth - targetWNoUser / 2;
+
+                if (isMygoLive2D) {
+                    if (preset === 'left') {
+                        baseX = 850;
+                    } else if (preset === 'right') {
+                        baseX = 1710;
+                    } else {
+                        baseX = centerX;
+                    }
+                } else {
+                    if (preset === 'center') baseX = canvasWidth / 2;
+                    if (preset === 'left') baseX = targetWNoUser / 2;
+                    if (preset === 'right') baseX = canvasWidth - targetWNoUser / 2;
+                }
             }
 
             // 应用尺寸
@@ -899,10 +921,6 @@ export default function CanvasRenderer(props: Props) {
 
                     const cx = container.x;
                     const cy = container.y;
-
-                    // 获取当前渲染时使用的 transform（用于旋转控制）
-                    const setTransformForCurrent = setTransformMap.get(t.target);
-                    const currentTransform = setTransformForCurrent ? setTransformForCurrent.transform : transformToUse;
 
                         // 始终初始化旋转中心点（即使不是旋转模式，也预先设置，以便在移动过程中切换）
                         const indicesForRotation = selectedIndexes.length > 0 ? [...selectedIndexes] : [index];
@@ -1282,7 +1300,7 @@ export default function CanvasRenderer(props: Props) {
         if (existingGuideLines) {
             stage.addChild(existingGuideLines);
         }
-    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY, overlayMode, canvasWidth, canvasHeight, enabledTargets, enabledTargetsArray, showSelectionBox, showTargetId]);
+    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY, overlayMode, canvasWidth, canvasHeight, enabledTargets, enabledTargetsArray, showSelectionBox, showTargetId, mygo3Mode]);
 
     // 独立的辅助线渲染逻辑
     useEffect(() => {

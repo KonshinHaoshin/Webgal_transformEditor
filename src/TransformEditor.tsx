@@ -62,6 +62,8 @@ export default function TransformEditor() {
   const [showSelectionBox, setShowSelectionBox] = useState(true);
   // 是否显示角色ID
   const [showTargetId, setShowTargetId] = useState(true);
+  // MyGO!!!!! 3.0 模式
+  const [mygo3Mode, setMygo3Mode] = useState(false);
   
   // 画幅比选择（高度固定为1440）
   type AspectRatio = '16:9' | '21:9' | '1.85:1' | '16:10' | '4:3' | 'custom';
@@ -1899,6 +1901,18 @@ export default function TransformEditor() {
               显示角色id
             </span>
           </label>
+        
+        <label style={{ display: "flex", alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={mygo3Mode}
+            onChange={(e) => setMygo3Mode(e.target.checked)}
+            style={{ marginRight: "8px", cursor: "pointer" }}
+          />
+          <span style={{ fontWeight: "bold", color: "#b91c1c" }}>
+            MyGO!!!!! 3.0 模式
+          </span>
+        </label>
         </div>
         
         {/* 立绘和背景启用列表 */}
@@ -2040,6 +2054,7 @@ export default function TransformEditor() {
           enabledTargetsArray={Array.from(enabledTargets)}
           showSelectionBox={showSelectionBox}
           showTargetId={showTargetId}
+          mygo3Mode={mygo3Mode}
           breakpoints={breakpoints}
           fullOutputScriptLines={fullOutputScriptLinesRef.current}
           outputScriptLines={outputScriptLines}

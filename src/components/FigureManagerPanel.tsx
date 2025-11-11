@@ -6,12 +6,16 @@ interface Props {
   transforms: TransformData[];
   selectedIndexes: number[];
   setSelectedIndexes: (indexes: number[]) => void;
+  mygo3Mode?: boolean;
+  setMygo3Mode?: (enabled: boolean) => void;
 }
 
 export default function FigureManagerPanel({
   transforms,
   selectedIndexes,
   setSelectedIndexes,
+  mygo3Mode = false,
+  setMygo3Mode,
 }: Props) {
   // 提取所有的立绘和背景
   const figures: Array<{ index: number; transform: TransformData; isBg: boolean }> = [];
@@ -79,6 +83,17 @@ export default function FigureManagerPanel({
         </div>
       </div>
       
+      <div className="figure-manager-controls">
+        <label className="mygo3-toggle">
+          <input
+            type="checkbox"
+            checked={mygo3Mode || false}
+            onChange={(e) => setMygo3Mode?.(e.target.checked)}
+          />
+          <span>🎸 MyGO!!!!! 3.0 模式</span>
+        </label>
+      </div>
+
       <div className="figure-manager-list">
         {figures.length === 0 ? (
           <div className="figure-manager-empty">
