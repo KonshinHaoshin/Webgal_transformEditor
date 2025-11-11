@@ -1495,20 +1495,6 @@ export default function TransformEditor() {
           setOutputScriptLines(lines);
           fullOutputScriptLinesRef.current = lines; // 保存完整脚本
 
-          // 自动打开脚本输出窗口
-          try {
-            await invoke('open_script_output_window');
-            // 窗口打开后，发送初始数据（使用刚生成的 outputScriptLines）
-            // 使用多个延迟确保窗口完全加载
-            setTimeout(() => {
-              updateScriptOutputWindow();
-            }, 300);
-            setTimeout(() => {
-              updateScriptOutputWindow();
-            }, 800);
-          } catch (error) {
-            console.error('打开脚本输出窗口失败:', error);
-          }
          }}
        >
          Load Script

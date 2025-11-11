@@ -626,18 +626,48 @@ export default function CanvasRenderer(props: Props) {
             const isTargetEnabled = enabledTargets.has(t.target) || enabledTargets.size === 0;
             
             if (!isTargetEnabled) {
-                // 如果target未启用，禁用交互
+                // 如果target未启用，完全禁用交互，让事件能够穿透
                 sprite.interactive = false;
+                sprite.hitArea = null;
+
+                // 使用 eventMode 来完全禁用事件（PIXI.js v6+）
+                if ('eventMode' in sprite) {
+                    (sprite as any).eventMode = 'none';
+                }
+
+                // 对于 Container（Live2D wrapper），需要禁用子元素的交互
+                if (sprite instanceof PIXI.Container) {
+                    sprite.interactiveChildren = false;
+                    // 确保容器本身也不拦截事件
+                    (sprite as any).buttonMode = false;
+                    (sprite as any).cursor = "default";
+                    // 对于容器内的子元素，也要禁用交互
+                    sprite.children.forEach((child: any) => {
+                        if (child) {
+                            child.interactive = false;
+                            if ('eventMode' in child) {
+                                child.eventMode = 'none';
+                            }
+                        }
+                    });
+                }
+                // 对于普通 Sprite，也需要清除 cursor
+                if (sprite instanceof PIXI.Sprite) {
+                    sprite.cursor = "default";
+                }
+                // 不注册任何事件监听器，让事件完全穿透
             } else {
+                // target 已启用，正常设置交互
                 sprite.interactive = true;
-            }
-            
-            sprite
-                .on("pointerdown", (e: any) => {
-                    // 检查target是否启用
-                    if (!enabledTargets.has(t.target) && enabledTargets.size > 0) {
-                        return; // 未启用的target不允许交互
-                    }
+
+                // 确保 eventMode 设置为正确的值（PIXI.js v6+）
+                if ('eventMode' in sprite) {
+                    (sprite as any).eventMode = 'static';
+                }
+
+                // 注册事件监听器
+                sprite
+                    .on("pointerdown", (e: any) => {
                     
                     const original = e.data.originalEvent as PointerEvent; // 🟡 获取原始键盘状态
                     const isAlt = original?.altKey;
@@ -782,6 +812,7 @@ export default function CanvasRenderer(props: Props) {
                     stage.on("pointerup", handleGlobalUp);
                     stage.on("pointerupoutside", handleGlobalUp);
                 });
+            }
 
             // 📏 蓝色边框（可选显示）
             if (showSelectionBox && selectedIndexes.includes(index)) {
