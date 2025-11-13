@@ -184,7 +184,7 @@ export default function CanvasRenderer(props: Props) {
         for (let i = effectiveTransforms.length - 1; i >= 0; i--) {
             const transform = effectiveTransforms[i];
             if (transform.type === 'changeFigure' && transform.target) {
-                const target = transform.target;
+                const {target} = transform;
                 if (!lastChangeFigureMap.has(target)) {
                     lastChangeFigureMap.set(target, transform);
                 }
