@@ -18,7 +18,7 @@
     "@tauri-apps/plugin-opener": "^2",
     "aos": "^2.3.4",
     "pixi-filters": "^4.2.0",
-    "pixi-live2d-display": "^0.4.0",
+    "pixi-live2d-display-webgal": "^0.5.12",
     "pixi.js": "^6.3.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

@@ -41,7 +41,7 @@ export class FigureManager {
   // 初始化 Live2D
   private async initLive2D() {
     try {
-      const { Live2DModel } = await import('pixi-live2d-display');
+      const { Live2DModel } = await import('pixi-live2d-display-webgal');
       this.live2DManager = {
         Live2DModel: Live2DModel as any,
         isAvailable: true
@@ -99,7 +99,7 @@ export class FigureManager {
     console.log('加载 Live2D 模型:', finalPath);
 
     // 注册 Live2D Ticker
-    const { Live2DModel } = await import('pixi-live2d-display');
+    const { Live2DModel } = await import('pixi-live2d-display-webgal');
     Live2DModel.registerTicker(PIXI.Ticker);
 
     const model = await this.live2DManager.Live2DModel.from(finalPath, {
@@ -153,7 +153,7 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
   }
 
   // 注册 Live2D Ticker（必须）
-  const { Live2DModel } = await import('pixi-live2d-display');
+  const { Live2DModel } = await import('pixi-live2d-display-webgal');
   Live2DModel.registerTicker(PIXI.Ticker);
 
   // 读取 JSONL 文件
