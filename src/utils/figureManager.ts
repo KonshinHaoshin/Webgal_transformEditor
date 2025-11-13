@@ -530,6 +530,14 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
                 } catch (e) {
                   console.warn(`应用 expression 失败 (${key}):`, e);
                 }
+              } else {
+                // 清除 expression（回到默认）
+                try {
+                  (child as any).expression(null);
+                  console.log(`✅ 已清除 expression 到 ${key}`);
+                } catch (e) {
+                  console.warn(`清除 expression 失败 (${key}):`, e);
+                }
               }
             }
           }
@@ -542,6 +550,49 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
             } catch (e) {
               console.warn(`应用 expression 失败 (${key}):`, e);
             }
+          } else {
+            // 清除 expression（回到默认）
+            try {
+              (model as any).expression(null);
+              console.log(`✅ 已清除 expression 到 ${key}`);
+            } catch (e) {
+              console.warn(`清除 expression 失败 (${key}):`, e);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 清除 motion（停止当前动作，回到默认状态）
+  clearMotion(key: string): void {
+    const figure = this.figures.get(key);
+    if (!figure) return;
+
+    if (figure.sourceType === 'live2d' || figure.sourceType === 'jsonl') {
+      const model = figure.displayObject;
+      if (model) {
+        // 如果是 JSONL（容器），需要遍历所有子模型
+        if (figure.sourceType === 'jsonl' && model.children) {
+          for (const child of model.children) {
+            if (child && typeof (child as any).motion === 'function') {
+              try {
+                // 停止当前 motion（传入 null 或空字符串）
+                (child as any).motion(null, 0, 0);
+                console.log(`✅ 已清除 motion 到 ${key}`);
+              } catch (e) {
+                console.warn(`清除 motion 失败 (${key}):`, e);
+              }
+            }
+          }
+        } else if (typeof (model as any).motion === 'function') {
+          // 单个 Live2D 模型
+          try {
+            // 停止当前 motion（传入 null 或空字符串）
+            (model as any).motion(null, 0, 0);
+            console.log(`✅ 已清除 motion 到 ${key}`);
+          } catch (e) {
+            console.warn(`清除 motion 失败 (${key}):`, e);
           }
         }
       }

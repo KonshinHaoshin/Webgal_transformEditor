@@ -140,71 +140,135 @@ fn extract_jsonl_motions_expressions(file_path: String, game_folder: Option<Stri
     let content = fs::read_to_string(&full_path)
         .map_err(|e| format!("读取文件失败: {}", e))?;
     
-    // 解析 JSONL 文件
-    let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
-    
     let mut motions: Vec<String> = Vec::new();
     let mut expressions: Vec<String> = Vec::new();
     
-    // 从后往前查找包含 motions 或 expressions 的行（通常是最后一行）
-    for line in lines.iter().rev() {
-        match serde_json::from_str::<Value>(line) {
+    // 根据文件扩展名判断是 JSON 还是 JSONL
+    let ext = full_path.extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+    
+    if ext == "json" {
+        // 解析 JSON 文件（整个文件是一个 JSON 对象）
+        match serde_json::from_str::<Value>(&content) {
             Ok(obj) => {
-                // 检查是否是汇总行（包含 motions 或 expressions）
-                if obj.get("motions").is_some() || obj.get("expressions").is_some() {
-                    // 提取 motions
-                    if let Some(motions_val) = obj.get("motions") {
-                        if let Some(motions_arr) = motions_val.as_array() {
-                            for m in motions_arr {
-                                if let Some(m_str) = m.as_str() {
-                                    motions.push(m_str.to_string());
-                                } else if let Some(m_obj) = m.as_object() {
-                                    // 如果是对象，尝试提取 name/file/id 字段
-                                    if let Some(name) = m_obj.get("name").and_then(|n| n.as_str()) {
-                                        motions.push(name.to_string());
-                                    } else if let Some(file) = m_obj.get("file").and_then(|f| f.as_str()) {
-                                        motions.push(file.to_string());
-                                    } else if let Some(id) = m_obj.get("id").and_then(|i| i.as_str()) {
-                                        motions.push(id.to_string());
-                                    }
+                // 提取 motions
+                if let Some(motions_val) = obj.get("motions") {
+                    if let Some(motions_arr) = motions_val.as_array() {
+                        // 如果是数组，提取字符串或对象的 name/file/id
+                        for m in motions_arr {
+                            if let Some(m_str) = m.as_str() {
+                                motions.push(m_str.to_string());
+                            } else if let Some(m_obj) = m.as_object() {
+                                // 如果是对象，尝试提取 name/file/id 字段
+                                if let Some(name) = m_obj.get("name").and_then(|n| n.as_str()) {
+                                    motions.push(name.to_string());
+                                } else if let Some(file) = m_obj.get("file").and_then(|f| f.as_str()) {
+                                    motions.push(file.to_string());
+                                } else if let Some(id) = m_obj.get("id").and_then(|i| i.as_str()) {
+                                    motions.push(id.to_string());
                                 }
                             }
-                        } else if let Some(motions_obj) = motions_val.as_object() {
-                            // 如果是对象，提取所有键名
-                            motions = motions_obj.keys().map(|k| k.to_string()).collect();
                         }
+                    } else if let Some(motions_obj) = motions_val.as_object() {
+                        // 如果是对象，提取所有键名
+                        motions = motions_obj.keys().map(|k| k.to_string()).collect();
                     }
-                    
-                    // 提取 expressions
-                    if let Some(expressions_val) = obj.get("expressions") {
-                        if let Some(expressions_arr) = expressions_val.as_array() {
-                            for e in expressions_arr {
-                                if let Some(e_str) = e.as_str() {
-                                    expressions.push(e_str.to_string());
-                                } else if let Some(e_obj) = e.as_object() {
-                                    // 如果是对象，尝试提取 name/file/id 字段
-                                    if let Some(name) = e_obj.get("name").and_then(|n| n.as_str()) {
-                                        expressions.push(name.to_string());
-                                    } else if let Some(file) = e_obj.get("file").and_then(|f| f.as_str()) {
-                                        expressions.push(file.to_string());
-                                    } else if let Some(id) = e_obj.get("id").and_then(|i| i.as_str()) {
-                                        expressions.push(id.to_string());
-                                    }
+                }
+                
+                // 提取 expressions
+                if let Some(expressions_val) = obj.get("expressions") {
+                    if let Some(expressions_arr) = expressions_val.as_array() {
+                        // 如果是数组，提取字符串或对象的 name/file/id
+                        for e in expressions_arr {
+                            if let Some(e_str) = e.as_str() {
+                                expressions.push(e_str.to_string());
+                            } else if let Some(e_obj) = e.as_object() {
+                                // 如果是对象，尝试提取 name/file/id 字段
+                                if let Some(name) = e_obj.get("name").and_then(|n| n.as_str()) {
+                                    expressions.push(name.to_string());
+                                } else if let Some(file) = e_obj.get("file").and_then(|f| f.as_str()) {
+                                    expressions.push(file.to_string());
+                                } else if let Some(id) = e_obj.get("id").and_then(|i| i.as_str()) {
+                                    expressions.push(id.to_string());
                                 }
                             }
-                        } else if let Some(expressions_obj) = expressions_val.as_object() {
-                            // 如果是对象，提取所有键名
-                            expressions = expressions_obj.keys().map(|k| k.to_string()).collect();
                         }
+                    } else if let Some(expressions_obj) = expressions_val.as_object() {
+                        // 如果是对象，提取所有键名
+                        expressions = expressions_obj.keys().map(|k| k.to_string()).collect();
                     }
-                    
-                    // 找到汇总行后就可以返回了
-                    break;
                 }
             }
-            Err(_) => {
-                // 忽略解析失败的行
-                continue;
+            Err(e) => {
+                return Err(format!("解析 JSON 文件失败: {}", e));
+            }
+        }
+    } else {
+        // 解析 JSONL 文件（每行一个 JSON 对象）
+        let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+        
+        // 从后往前查找包含 motions 或 expressions 的行（通常是最后一行）
+        for line in lines.iter().rev() {
+            match serde_json::from_str::<Value>(line) {
+                Ok(obj) => {
+                    // 检查是否是汇总行（包含 motions 或 expressions）
+                    if obj.get("motions").is_some() || obj.get("expressions").is_some() {
+                        // 提取 motions
+                        if let Some(motions_val) = obj.get("motions") {
+                            if let Some(motions_arr) = motions_val.as_array() {
+                                for m in motions_arr {
+                                    if let Some(m_str) = m.as_str() {
+                                        motions.push(m_str.to_string());
+                                    } else if let Some(m_obj) = m.as_object() {
+                                        // 如果是对象，尝试提取 name/file/id 字段
+                                        if let Some(name) = m_obj.get("name").and_then(|n| n.as_str()) {
+                                            motions.push(name.to_string());
+                                        } else if let Some(file) = m_obj.get("file").and_then(|f| f.as_str()) {
+                                            motions.push(file.to_string());
+                                        } else if let Some(id) = m_obj.get("id").and_then(|i| i.as_str()) {
+                                            motions.push(id.to_string());
+                                        }
+                                    }
+                                }
+                            } else if let Some(motions_obj) = motions_val.as_object() {
+                                // 如果是对象，提取所有键名
+                                motions = motions_obj.keys().map(|k| k.to_string()).collect();
+                            }
+                        }
+                        
+                        // 提取 expressions
+                        if let Some(expressions_val) = obj.get("expressions") {
+                            if let Some(expressions_arr) = expressions_val.as_array() {
+                                for e in expressions_arr {
+                                    if let Some(e_str) = e.as_str() {
+                                        expressions.push(e_str.to_string());
+                                    } else if let Some(e_obj) = e.as_object() {
+                                        // 如果是对象，尝试提取 name/file/id 字段
+                                        if let Some(name) = e_obj.get("name").and_then(|n| n.as_str()) {
+                                            expressions.push(name.to_string());
+                                        } else if let Some(file) = e_obj.get("file").and_then(|f| f.as_str()) {
+                                            expressions.push(file.to_string());
+                                        } else if let Some(id) = e_obj.get("id").and_then(|i| i.as_str()) {
+                                            expressions.push(id.to_string());
+                                        }
+                                    }
+                                }
+                            } else if let Some(expressions_obj) = expressions_val.as_object() {
+                                // 如果是对象，提取所有键名
+                                expressions = expressions_obj.keys().map(|k| k.to_string()).collect();
+                            }
+                        }
+                        
+                        // 找到汇总行后就可以返回了
+                        break;
+                    }
+                }
+                Err(_) => {
+                    // 忽略解析失败的行
+                    continue;
+                }
             }
         }
     }

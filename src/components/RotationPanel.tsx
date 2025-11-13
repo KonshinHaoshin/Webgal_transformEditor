@@ -37,9 +37,10 @@ export default function RotationPanel({
             for (const index of selectedIndexes) {
                 const t = transforms[index];
                 if (t.type === 'changeFigure' && t.path) {
-                    // 检查是否是 JSONL 文件
+                    // 检查是否是 JSONL 或 JSON 文件
                     const isJsonl = t.path.toLowerCase().endsWith('.jsonl');
-                    if (isJsonl && !newMotionsMap.has(t.path)) {
+                    const isJson = t.path.toLowerCase().endsWith('.json');
+                    if ((isJsonl || isJson) && !newMotionsMap.has(t.path)) {
                         try {
                             const { motions, expressions } = await extractMotionsAndExpressions(t.path);
                             newMotionsMap.set(t.path, motions);
@@ -229,8 +230,9 @@ export default function RotationPanel({
                         if (t.type !== 'changeFigure') return null;
 
                         const isJsonl = t.path?.toLowerCase().endsWith('.jsonl');
-                        const motions = isJsonl ? getMotions(t.path) : [];
-                        const expressions = isJsonl ? getExpressions(t.path) : [];
+                        const isJson = t.path?.toLowerCase().endsWith('.json');
+                        const motions = (isJsonl || isJson) ? getMotions(t.path) : [];
+                        const expressions = (isJsonl || isJson) ? getExpressions(t.path) : [];
                         const currentMotion = t.motion || '';
                         const currentExpression = t.expression || '';
 
@@ -246,7 +248,7 @@ export default function RotationPanel({
                                     </label>
 
                                     {/* Motion 选择器 */}
-                                    {isJsonl && onChangeMotion && (
+                                    {(isJsonl || isJson) && onChangeMotion && (
                                         <label>
                                             Motion:
                                             <select
@@ -265,7 +267,7 @@ export default function RotationPanel({
                                     )}
 
                                     {/* Expression 选择器 */}
-                                    {isJsonl && onChangeExpression && (
+                                    {(isJsonl || isJson) && onChangeExpression && (
                                         <label>
                                             Expression:
                                             <select
@@ -283,9 +285,9 @@ export default function RotationPanel({
                                         </label>
                                     )}
 
-                                    {!isJsonl && (
+                                    {!(isJsonl || isJson) && (
                                         <span style={{ color: "#999", fontSize: "12px" }}>
-                                            （仅 JSONL 文件支持动作和表情选择）
+                                            （仅 JSON/JSONL 文件支持动作和表情选择）
                                         </span>
                                     )}
                                 </div>

@@ -202,8 +202,9 @@ export default function FilterEditor({
       for (const transform of transforms) {
         if (transform.type === 'changeFigure' && transform.path) {
           const isJsonl = transform.path.toLowerCase().endsWith('.jsonl');
-          if (isJsonl && !newMotionsMap.has(transform.path)) {
-            console.log(`🔄 开始加载 JSONL: ${transform.path}`);
+          const isJson = transform.path.toLowerCase().endsWith('.json');
+          if ((isJsonl || isJson) && !newMotionsMap.has(transform.path)) {
+            console.log(`🔄 开始加载 ${isJsonl ? 'JSONL' : 'JSON'}: ${transform.path}`);
             console.log(`   游戏文件夹: ${gameFolder}`);
             try {
               // 传入 gameFolder 参数，确保后端能正确找到文件
@@ -706,13 +707,14 @@ export default function FilterEditor({
 
       {/* Live2D 动作和表情选择器 */}
       {(() => {
-        // 检查是否有 JSONL 格式的 changeFigure
+        // 检查是否有 JSONL 或 JSON 格式的 changeFigure
         const isJsonl = currentChangeFigure?.path?.toLowerCase().endsWith('.jsonl');
+        const isJson = currentChangeFigure?.path?.toLowerCase().endsWith('.json');
         const motions = currentChangeFigure?.path ? getMotions(currentChangeFigure.path) : [];
         const expressions = currentChangeFigure?.path ? getExpressions(currentChangeFigure.path) : [];
 
-        // 如果有 JSONL 文件，显示选择器（即使列表为空也显示，方便调试）
-        if (currentChangeFigure && isJsonl) {
+        // 如果有 JSONL 或 JSON 文件，显示选择器（即使列表为空也显示，方便调试）
+        if (currentChangeFigure && (isJsonl || isJson)) {
           return (
             <div style={{ marginBottom: 16, padding: 12, border: "1px solid #e5e7eb", borderRadius: 6, background: "#fff" }}>
               <h3 style={{ margin: "0 0 12px 0", fontSize: "14px", fontWeight: "600", color: "#374151" }}>
@@ -790,7 +792,7 @@ export default function FilterEditor({
                 <div style={{ marginTop: 8, padding: 8, background: "#fef3c7", borderRadius: 4, fontSize: "11px", color: "#92400e" }}>
                   <div>⚠️ 正在加载 motions 和 expressions...</div>
                   <div style={{ marginTop: 4 }}>路径: {currentChangeFigure.path}</div>
-                  <div>如果长时间未加载，请检查 JSONL 文件格式是否正确</div>
+                  <div>如果长时间未加载，请检查 {isJsonl ? 'JSONL' : 'JSON'} 文件格式是否正确</div>
                 </div>
               )}
             </div>
