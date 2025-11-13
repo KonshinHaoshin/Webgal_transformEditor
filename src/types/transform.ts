@@ -10,8 +10,10 @@ interface BaseTransformData {
         [key: string]: any;
     };
     path?: string; // 对于 changeFigure，保存路径
-    //  TODO: 未来实现对表情和动作的支持
-    extraParams?: Record<string, string>; // 保存 motion / expression 等
+    // Live2D 动作和表情支持
+    motion?: string; // Live2D 动作名称
+    expression?: string; // Live2D 表情名称
+    extraParams?: Record<string, string>; // 保存其他额外参数
     // 仅changeFigure type会使用的类型
     presetPosition?: 'left' | 'center' | 'right';
     // 新增：动画缓动函数

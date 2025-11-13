@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { TransformData } from "../types/transform";
+import { extractMotionsAndExpressions } from "../utils/jsonlParser";
 
 type Props = {
   transforms: TransformData[];
@@ -7,6 +8,7 @@ type Props = {
   selectedIndexes: number[];
   applyFilterToBg: boolean;                 // 复用你已有的"同时作用于背景"开关
   setApplyFilterToBg: (v: boolean) => void; // 从父组件同步勾选框
+  selectedGameFolder?: string | null;        // 游戏文件夹路径（用于加载 JSONL）
 };
 
 type FilterKey =
@@ -79,6 +81,7 @@ export default function FilterEditor({
   selectedIndexes,
   applyFilterToBg,
   setApplyFilterToBg,
+  selectedGameFolder,
 }: Props) {
   // 面板显示值（从当前选中或默认初始化）
   const [values, setValues] = useState<Record<FilterKey, number>>(DEFAULTS);
@@ -104,6 +107,10 @@ export default function FilterEditor({
   const positionPresets = useMemo(() => {
     return { ...builtinPositionPresets, ...userPositionPresets };
   }, [builtinPositionPresets, userPositionPresets]);
+
+  // Live2D motions 和 expressions 相关状态
+  const [motionsMap, setMotionsMap] = useState<Map<string, string[]>>(new Map());
+  const [expressionsMap, setExpressionsMap] = useState<Map<string, string[]>>(new Map());
 
   // 获取所有可用的target ID列表（用于勾选）
   const availableTargetIds = useMemo(() => {
@@ -168,6 +175,166 @@ export default function FilterEditor({
       }
     }
   }, [availableTargetIds]);
+
+  // 加载选中目标的 motions 和 expressions（仅对 changeFigure 且是 JSONL 文件）
+  useEffect(() => {
+    const loadMotionsAndExpressions = async () => {
+      // 如果没有游戏文件夹，尝试从 webgalFileManager 获取
+      let gameFolder = selectedGameFolder;
+      if (!gameFolder) {
+        try {
+          const { webgalFileManager } = await import('../utils/webgalFileManager');
+          gameFolder = webgalFileManager.getGameFolder();
+        } catch (e) {
+          console.warn('无法获取游戏文件夹:', e);
+        }
+      }
+
+      if (!gameFolder) {
+        console.warn('⚠️ 游戏文件夹未设置，无法加载 JSONL 文件');
+        return;
+      }
+
+      const newMotionsMap = new Map(motionsMap);
+      const newExpressionsMap = new Map(expressionsMap);
+
+      // 遍历所有 changeFigure 类型的 transform
+      for (const transform of transforms) {
+        if (transform.type === 'changeFigure' && transform.path) {
+          const isJsonl = transform.path.toLowerCase().endsWith('.jsonl');
+          const isJson = transform.path.toLowerCase().endsWith('.json');
+          if ((isJsonl || isJson) && !newMotionsMap.has(transform.path)) {
+            console.log(`🔄 开始加载 ${isJsonl ? 'JSONL' : 'JSON'}: ${transform.path}`);
+            console.log(`   游戏文件夹: ${gameFolder}`);
+            try {
+              // 传入 gameFolder 参数，确保后端能正确找到文件
+              const { motions, expressions } = await extractMotionsAndExpressions(transform.path, gameFolder);
+              console.log(`✅ 加载完成: ${transform.path} - ${motions.length} motions, ${expressions.length} expressions`);
+              newMotionsMap.set(transform.path, motions);
+              newExpressionsMap.set(transform.path, expressions);
+            } catch (error) {
+              console.error(`❌ 加载 motions/expressions 失败 (${transform.path}):`, error);
+              // 即使失败也设置空数组，避免重复尝试
+              newMotionsMap.set(transform.path, []);
+              newExpressionsMap.set(transform.path, []);
+            }
+          }
+        }
+      }
+
+      setMotionsMap(newMotionsMap);
+      setExpressionsMap(newExpressionsMap);
+    };
+
+    loadMotionsAndExpressions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transforms, selectedGameFolder]);
+
+  // 获取指定路径的 motions 和 expressions
+  const getMotions = (path: string | undefined): string[] => {
+    if (!path) return [];
+    return motionsMap.get(path) || [];
+  };
+
+  const getExpressions = (path: string | undefined): string[] => {
+    if (!path) return [];
+    return expressionsMap.get(path) || [];
+  };
+
+  // 获取当前选中的 changeFigure 的路径（用于显示 motion 和 expression 选择器）
+  // 只返回每个 target 的最后一个 changeFigure
+  const currentChangeFigure = useMemo(() => {
+    let targetToFind: string | null = null;
+
+    // 如果勾选了特定的ID，优先使用第一个勾选的ID
+    if (selectedFilterTargets.size > 0) {
+      targetToFind = Array.from(selectedFilterTargets)[0];
+    } else if (selectedIndexes.length > 0) {
+      // 否则使用选中的索引对应的 target
+      const idx = selectedIndexes[0];
+      const t = transforms[idx];
+      if (t && t.target) {
+        targetToFind = t.target;
+      }
+    }
+
+    if (targetToFind) {
+      // 从后往前找该 target 的最后一个 changeFigure
+      for (let i = transforms.length - 1; i >= 0; i--) {
+        const t = transforms[i];
+        if (t.type === 'changeFigure' && t.target === targetToFind) {
+          return t;
+        }
+      }
+    }
+
+    // 否则找第一个 target 的最后一个 changeFigure
+    const firstTarget = transforms.find(t => t.type === 'changeFigure')?.target;
+    if (firstTarget) {
+      for (let i = transforms.length - 1; i >= 0; i--) {
+        const t = transforms[i];
+        if (t.type === 'changeFigure' && t.target === firstTarget) {
+          return t;
+        }
+      }
+    }
+
+    return undefined;
+  }, [transforms, selectedIndexes, selectedFilterTargets]);
+
+  // 更新 motion（只更新最后一个 changeFigure）
+  const handleMotionChange = (motion: string) => {
+    if (!currentChangeFigure) return;
+
+    setTransforms((prev) => {
+      // 找到该 target 的最后一个 changeFigure 的索引
+      let lastChangeFigureIndex = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        const t = prev[i];
+        if (t.type === 'changeFigure' && t.target === currentChangeFigure.target) {
+          lastChangeFigureIndex = i;
+          break;
+        }
+      }
+
+      if (lastChangeFigureIndex === -1) return prev;
+
+      // 只更新最后一个 changeFigure
+      const newTransforms = [...prev];
+      newTransforms[lastChangeFigureIndex] = {
+        ...newTransforms[lastChangeFigureIndex],
+        motion: motion || undefined
+      };
+      return newTransforms;
+    });
+  };
+
+  // 更新 expression（只更新最后一个 changeFigure）
+  const handleExpressionChange = (expression: string) => {
+    if (!currentChangeFigure) return;
+
+    setTransforms((prev) => {
+      // 找到该 target 的最后一个 changeFigure 的索引
+      let lastChangeFigureIndex = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        const t = prev[i];
+        if (t.type === 'changeFigure' && t.target === currentChangeFigure.target) {
+          lastChangeFigureIndex = i;
+          break;
+        }
+      }
+
+      if (lastChangeFigureIndex === -1) return prev;
+
+      // 只更新最后一个 changeFigure
+      const newTransforms = [...prev];
+      newTransforms[lastChangeFigureIndex] = {
+        ...newTransforms[lastChangeFigureIndex],
+        expression: expression || undefined
+      };
+      return newTransforms;
+    });
+  };
 
   // 当选择变化或 transforms 变化时，同步面板显示值（保留缺失字段的默认值）
   useEffect(() => {
@@ -537,6 +704,102 @@ export default function FilterEditor({
           )}
         </div>
       </div>
+
+      {/* Live2D 动作和表情选择器 */}
+      {(() => {
+        // 检查是否有 JSONL 或 JSON 格式的 changeFigure
+        const isJsonl = currentChangeFigure?.path?.toLowerCase().endsWith('.jsonl');
+        const isJson = currentChangeFigure?.path?.toLowerCase().endsWith('.json');
+        const motions = currentChangeFigure?.path ? getMotions(currentChangeFigure.path) : [];
+        const expressions = currentChangeFigure?.path ? getExpressions(currentChangeFigure.path) : [];
+
+        // 如果有 JSONL 或 JSON 文件，显示选择器（即使列表为空也显示，方便调试）
+        if (currentChangeFigure && (isJsonl || isJson)) {
+          return (
+            <div style={{ marginBottom: 16, padding: 12, border: "1px solid #e5e7eb", borderRadius: 6, background: "#fff" }}>
+              <h3 style={{ margin: "0 0 12px 0", fontSize: "14px", fontWeight: "600", color: "#374151" }}>
+                Live2D 动作和表情
+                {currentChangeFigure.target && (
+                  <span style={{ fontSize: "12px", color: "#6b7280", marginLeft: 8 }}>
+                    (target: {currentChangeFigure.target})
+                  </span>
+                )}
+              </h3>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: "14px", minWidth: 60 }}>Motion:</span>
+                  <select
+                    value={currentChangeFigure.motion || ''}
+                    onChange={(e) => handleMotionChange(e.target.value)}
+                    style={{
+                      padding: "4px 8px",
+                      border: "1px solid #d1d5db",
+                      borderRadius: 4,
+                      fontSize: "14px",
+                      minWidth: 150
+                    }}
+                  >
+                    <option value="">无动作</option>
+                    {motions.length > 0 ? (
+                      motions.map((motion) => (
+                        <option key={motion} value={motion}>
+                          {motion}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="" disabled>加载中...</option>
+                    )}
+                  </select>
+                  {motions.length > 0 && (
+                    <span style={{ fontSize: "12px", color: "#6b7280", marginLeft: 4 }}>
+                      ({motions.length} 个动作)
+                    </span>
+                  )}
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: "14px", minWidth: 80 }}>Expression:</span>
+                  <select
+                    value={currentChangeFigure.expression || ''}
+                    onChange={(e) => handleExpressionChange(e.target.value)}
+                    style={{
+                      padding: "4px 8px",
+                      border: "1px solid #d1d5db",
+                      borderRadius: 4,
+                      fontSize: "14px",
+                      minWidth: 150
+                    }}
+                  >
+                    <option value="">无表情</option>
+                    {expressions.length > 0 ? (
+                      expressions.map((expression) => (
+                        <option key={expression} value={expression}>
+                          {expression}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="" disabled>加载中...</option>
+                    )}
+                  </select>
+                  {expressions.length > 0 && (
+                    <span style={{ fontSize: "12px", color: "#6b7280", marginLeft: 4 }}>
+                      ({expressions.length} 个表情)
+                    </span>
+                  )}
+                </label>
+              </div>
+              {/* 调试信息 - 显示加载状态 */}
+              {motions.length === 0 && expressions.length === 0 && (
+                <div style={{ marginTop: 8, padding: 8, background: "#fef3c7", borderRadius: 4, fontSize: "11px", color: "#92400e" }}>
+                  <div>⚠️ 正在加载 motions 和 expressions...</div>
+                  <div style={{ marginTop: 4 }}>路径: {currentChangeFigure.path}</div>
+                  <div>如果长时间未加载，请检查 {isJsonl ? 'JSONL' : 'JSON'} 文件格式是否正确</div>
+                </div>
+              )}
+            </div>
+          );
+        }
+        return null;
+      })()}
 
       {/* 预设管理区域 */}
       <div style={{ 

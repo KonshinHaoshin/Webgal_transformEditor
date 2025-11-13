@@ -7,6 +7,7 @@ export default function FilterEditorWindow() {
   const [transforms, setTransforms] = useState<TransformData[]>([]);
   const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
   const [applyFilterToBg, setApplyFilterToBg] = useState(false);
+  const [selectedGameFolder, setSelectedGameFolder] = useState<string | null>(null);
   const isReceivingUpdateRef = useRef(false); // 标记是否正在接收来自主窗口的更新
   const isInitializedRef = useRef(false); // 标记是否已经初始化（接收过第一次数据）
 
@@ -14,16 +15,40 @@ export default function FilterEditorWindow() {
     // 监听来自主窗口的数据更新事件（全局事件）
     const setupListener = async () => {
       const unlistenUpdate = await listen<{
-        transforms: TransformData[];
-        selectedIndexes: number[];
-        applyFilterToBg: boolean;
-      }>('filter-editor:update-data', (event) => {
-        // 检查数据有效性
-        if (event.payload && Array.isArray(event.payload.transforms)) {
+      return await listen<{
+              transforms: TransformData[];
+              selectedIndexes: number[];
+              applyFilterToBg: boolean;
+              selectedGameFolder?: string | null;
+            }>('filter-editor:update-data', (event) => {
+              // 检查数据有效性
+              if (event.payload && Array.isArray(event.payload.transforms)) {
+                isReceivingUpdateRef.current = true; // 标记正在接收更新
+                setTransforms(event.payload.transforms);
+                setSelectedIndexes(event.payload.selectedIndexes || []);
+                setApplyFilterToBg(event.payload.applyFilterToBg || false);
+                // 更新游戏文件夹路径（用于加载 JSONL）
+                if (event.payload.selectedGameFolder !== undefined) {
+                  setSelectedGameFolder(event.payload.selectedGameFolder);
+                }
+                isInitializedRef.current = true; // 标记已初始化
+                // 重置标记
+                setTimeout(() => {
+                  isReceivingUpdateRef.current = false;
+                }, 100);
+              } else {
+                console.warn('接收到无效的更新数据:', event.payload);
+              }
+            });
+
           isReceivingUpdateRef.current = true; // 标记正在接收更新
           setTransforms(event.payload.transforms);
           setSelectedIndexes(event.payload.selectedIndexes || []);
           setApplyFilterToBg(event.payload.applyFilterToBg || false);
+          // 更新游戏文件夹路径（用于加载 JSONL）
+          if (event.payload.selectedGameFolder !== undefined) {
+            setSelectedGameFolder(event.payload.selectedGameFolder);
+          }
           isInitializedRef.current = true; // 标记已初始化
           // 重置标记
           setTimeout(() => {
@@ -85,6 +110,7 @@ export default function FilterEditorWindow() {
         selectedIndexes={selectedIndexes}
         applyFilterToBg={applyFilterToBg}
         setApplyFilterToBg={setApplyFilterToBg}
+        selectedGameFolder={selectedGameFolder}
       />
     </div>
   );

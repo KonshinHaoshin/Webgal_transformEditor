@@ -168,6 +168,8 @@ export function buildAnimationSequence(transforms: TransformData[], transformInd
         setTransforms: TransformData[];
     }>();
     
+    // changeFigure 不再处理 motion/expression，不再需要收集
+    
     // 收集每个 figureID 的所有相关命令（包括背景）
     for (const transform of transforms) {
         if (transform.type === 'rawText') {
@@ -301,6 +303,8 @@ export function buildAnimationSequence(transforms: TransformData[], transformInd
         // 否则，移动到连续序列的末尾
         seqStart = k;
     }
+    
+    // changeFigure 不再处理 motion/expression，直接跳过
     
     // 按顺序处理每个 setTransform
     let currentTime = 0;
@@ -609,29 +613,18 @@ export function applyFigureIDSystem(transforms: TransformData[]): TransformData[
             result.push(transform);
         } else {
             // changeFigure：保持原始状态，不合并 setTransform 的 transform
+            // 注意：允许同一个 figureID 有多个 changeFigure（因为可能有不同的 motion/expression）
             const figureID = transform.target;
             if (figureID && figureID !== 'bg-main') {
-                // 检查是否已经添加过该 figureID 的 changeFigure
-                const alreadyAdded = result.some(
-                    (t) => t.type === 'changeFigure' && t.target === figureID
-                );
-                if (!alreadyAdded) {
-                    // 保持原始 changeFigure 状态，不合并 setTransform
-                    result.push(transform);
-                }
+                // 直接添加所有 changeFigure，不进行去重
+                // 因为每个 changeFigure 可能代表不同的状态（不同的 motion/expression）
+                result.push(transform);
             }
         }
     }
     
-    // 添加那些在原始序列中从未出现过的 figure（不应该发生，但保险起见）
-    figureStates.forEach((state, figureID) => {
-        const alreadyAdded = result.some(
-            (t) => t.type === 'changeFigure' && t.target === figureID
-        );
-        if (!alreadyAdded) {
-            result.push(state);
-        }
-    });
+    // 注意：不再需要添加那些在原始序列中从未出现过的 figure
+    // 因为我们已经保留了所有的 changeFigure，包括它们的 motion 和 expression
     
     return result;
 }

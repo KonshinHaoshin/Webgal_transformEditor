@@ -5,7 +5,8 @@ import { parseScript, applyFigureIDSystem } from './utils/transformParser';
 
 export default function ScriptOutputWindow() {
   const [outputScriptLines, setOutputScriptLines] = useState<string[]>([]);
-  const [, setTransforms] = useState<TransformData[]>([]); // 只用于设置，不读取
+  const [transforms, setTransforms] = useState<TransformData[]>([]); // 用于读取，获取当前选中的 target
+  const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]); // 用于读取，获取当前选中的索引
   const [scaleX, setScaleX] = useState(1);
   const [scaleY, setScaleY] = useState(1);
   const [, setSelectedGameFolder] = useState<string | null>(null); // 只用于设置，不读取
@@ -54,7 +55,19 @@ export default function ScriptOutputWindow() {
         }
       });
 
-      return unlistenUpdate;
+      // 监听选中索引更新
+      const unlistenSelected = await listen<{
+        selectedIndexes: number[];
+      }>('script-output:selected-indexes-updated', (event) => {
+        if (event.payload && Array.isArray(event.payload.selectedIndexes)) {
+          setSelectedIndexes(event.payload.selectedIndexes);
+        }
+      });
+
+      return () => {
+        unlistenUpdate();
+        unlistenSelected();
+      };
     };
 
     let unlistenFn: (() => void) | null = null;
@@ -170,6 +183,96 @@ export default function ScriptOutputWindow() {
     handleOutputScriptChange(newScript);
   };
 
+  // 添加空白语句
+  const handleAddBlankLine = () => {
+    const newLines = [...outputScriptLines, ''];
+    setOutputScriptLines(newLines);
+    handleOutputScriptChange(newLines.join('\n'));
+  };
+
+  // 获取下一个 figure 名称
+  const getNextFigureName = (): string => {
+    let max = 0;
+    for (const t of transforms) {
+      const m = /^figure(\d+)$/.exec(t.target);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+    return `figure${max + 1}`;
+  };
+
+  // 获取当前选中的 target（如果有）
+  const getSelectedTarget = (): string | null => {
+    if (selectedIndexes.length > 0) {
+      const firstSelected = transforms[selectedIndexes[0]];
+      if (firstSelected && firstSelected.target) {
+        return firstSelected.target;
+      }
+    }
+    return null;
+  };
+
+  // 添加 changeFigure
+  const handleAddChangeFigure = () => {
+    const selectedTarget = getSelectedTarget();
+    const target = selectedTarget || getNextFigureName();
+    
+    // 查找该 target 的最后一个 changeFigure（如果有），用于继承路径和 transform
+    let path = '';
+    let transform = { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } };
+    let presetPosition: 'left' | 'center' | 'right' = 'center';
+    
+    for (let i = transforms.length - 1; i >= 0; i--) {
+      const t = transforms[i];
+      if (t.type === 'changeFigure' && t.target === target) {
+        path = t.path || '';
+        transform = t.transform || transform;
+        presetPosition = t.presetPosition || 'center';
+        break;
+      }
+    }
+    
+    // 如果没有找到路径，使用默认值
+    if (!path) {
+      path = 'path/to/figure.png'; // 默认路径，用户可以编辑
+    }
+    
+    const transformJson = JSON.stringify(transform);
+    const presetFlag = presetPosition && presetPosition !== 'center' ? ` -${presetPosition}` : '';
+    const newLine = `changeFigure:${path} -id=${target} -transform=${transformJson}${presetFlag};`;
+    
+    const newLines = [...outputScriptLines, newLine];
+    setOutputScriptLines(newLines);
+    handleOutputScriptChange(newLines.join('\n'));
+  };
+
+  // 添加 changeBg
+  const handleAddChangeBg = () => {
+    // 查找最后一个 changeBg（如果有），用于继承路径和 transform
+    let path = '';
+    let transform = { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } };
+    
+    for (let i = transforms.length - 1; i >= 0; i--) {
+      const t = transforms[i];
+      if (t.type === 'changeBg') {
+        path = t.path || '';
+        transform = t.transform || transform;
+        break;
+      }
+    }
+    
+    // 如果没有找到路径，使用默认值
+    if (!path) {
+      path = 'path/to/background.png'; // 默认路径，用户可以编辑
+    }
+    
+    const transformJson = JSON.stringify(transform);
+    const newLine = `changeBg:${path} -transform=${transformJson};`;
+    
+    const newLines = [...outputScriptLines, newLine];
+    setOutputScriptLines(newLines);
+    handleOutputScriptChange(newLines.join('\n'));
+  };
+
   // 复制脚本
   const handleCopyScript = () => {
     const script = outputScriptLines.join('\n');
@@ -217,7 +320,55 @@ export default function ScriptOutputWindow() {
         <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>
           📝 输出脚本
         </h2>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            onClick={handleAddBlankLine}
+            style={{
+              padding: '8px 16px',
+              fontSize: '14px',
+              backgroundColor: '#6c757d',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+            title="添加一行空白语句"
+          >
+            + 空白语句
+          </button>
+          <button
+            onClick={handleAddChangeFigure}
+            style={{
+              padding: '8px 16px',
+              fontSize: '14px',
+              backgroundColor: '#17a2b8',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+            title="添加 changeFigure 语句（如果选中了 target 则使用该 target，否则创建新的 figure）"
+          >
+            + changeFigure
+          </button>
+          <button
+            onClick={handleAddChangeBg}
+            style={{
+              padding: '8px 16px',
+              fontSize: '14px',
+              backgroundColor: '#ffc107',
+              color: '#000',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+            title="添加 changeBg 语句"
+          >
+            + changeBg
+          </button>
           <button
             onClick={handleCopyScript}
             style={{

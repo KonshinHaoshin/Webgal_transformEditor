@@ -473,6 +473,131 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
   isLive2DAvailable(): boolean {
     return this.live2DManager?.isAvailable || false;
   }
+
+  // 应用 motion 到 Live2D 模型
+  applyMotion(key: string, motion: string | undefined): void {
+    const figure = this.figures.get(key);
+    if (!figure) return;
+
+    if (figure.sourceType === 'live2d' || figure.sourceType === 'jsonl') {
+      const model = figure.displayObject;
+      if (model) {
+        // 如果是 JSONL（容器），需要遍历所有子模型
+        if (figure.sourceType === 'jsonl' && model.children) {
+          for (const child of model.children) {
+            if (child && typeof (child as any).motion === 'function') {
+              if (motion) {
+                try {
+                  (child as any).motion(motion, 0, 3);
+                  console.log(`✅ 已应用 motion "${motion}" 到 ${key}`);
+                } catch (e) {
+                  console.warn(`应用 motion 失败 (${key}):`, e);
+                }
+              }
+            }
+          }
+        } else if (typeof (model as any).motion === 'function') {
+          // 单个 Live2D 模型
+          if (motion) {
+            try {
+              (model as any).motion(motion, 0, 3);
+              console.log(`✅ 已应用 motion "${motion}" 到 ${key}`);
+            } catch (e) {
+              console.warn(`应用 motion 失败 (${key}):`, e);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 应用 expression 到 Live2D 模型
+  applyExpression(key: string, expression: string | undefined): void {
+    const figure = this.figures.get(key);
+    if (!figure) return;
+
+    if (figure.sourceType === 'live2d' || figure.sourceType === 'jsonl') {
+      const model = figure.displayObject;
+      if (model) {
+        // 如果是 JSONL（容器），需要遍历所有子模型
+        if (figure.sourceType === 'jsonl' && model.children) {
+          for (const child of model.children) {
+            if (child && typeof (child as any).expression === 'function') {
+              if (expression !== null && expression !== undefined && expression !== "") {
+                try {
+                  (child as any).expression(expression);
+                  console.log(`✅ 已应用 expression "${expression}" 到 ${key}`);
+                } catch (e) {
+                  console.warn(`应用 expression 失败 (${key}):`, e);
+                }
+              } else {
+                // 清除 expression（回到默认，包括空字符串）
+                try {
+                  (child as any).expression(null);
+                  console.log(`✅ 已清除 expression 到 ${key}`);
+                } catch (e) {
+                  console.warn(`清除 expression 失败 (${key}):`, e);
+                }
+              }
+            }
+          }
+        } else if (typeof (model as any).expression === 'function') {
+          // 单个 Live2D 模型
+          if (expression) {
+            try {
+              (model as any).expression(expression);
+              console.log(`✅ 已应用 expression "${expression}" 到 ${key}`);
+            } catch (e) {
+              console.warn(`应用 expression 失败 (${key}):`, e);
+            }
+          } else {
+            // 清除 expression（回到默认）
+            try {
+              (model as any).expression(null);
+              console.log(`✅ 已清除 expression 到 ${key}`);
+            } catch (e) {
+              console.warn(`清除 expression 失败 (${key}):`, e);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 清除 motion（停止当前动作，回到默认状态）
+  clearMotion(key: string): void {
+    const figure = this.figures.get(key);
+    if (!figure) return;
+
+    if (figure.sourceType === 'live2d' || figure.sourceType === 'jsonl') {
+      const model = figure.displayObject;
+      if (model) {
+        // 如果是 JSONL（容器），需要遍历所有子模型
+        if (figure.sourceType === 'jsonl' && model.children) {
+          for (const child of model.children) {
+            if (child && typeof (child as any).motion === 'function') {
+              try {
+                // 停止当前 motion（传入 null 或空字符串）
+                (child as any).motion(null, 0, 0);
+                console.log(`✅ 已清除 motion 到 ${key}`);
+              } catch (e) {
+                console.warn(`清除 motion 失败 (${key}):`, e);
+              }
+            }
+          }
+        } else if (typeof (model as any).motion === 'function') {
+          // 单个 Live2D 模型
+          try {
+            // 停止当前 motion（传入 null 或空字符串）
+            (model as any).motion(null, 0, 0);
+            console.log(`✅ 已清除 motion 到 ${key}`);
+          } catch (e) {
+            console.warn(`清除 motion 失败 (${key}):`, e);
+          }
+        }
+      }
+    }
+  }
 }
 
 // 导出单例

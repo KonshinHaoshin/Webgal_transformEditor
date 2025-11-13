@@ -821,7 +821,8 @@ export default function TransformEditor() {
       await emit('filter-editor:update-data', {
         transforms,
         selectedIndexes,
-        applyFilterToBg
+        applyFilterToBg,
+        selectedGameFolder: selectedGameFolder || webgalFileManager.getGameFolder() || null
       });
     } catch (error) {
       console.error('更新滤镜编辑器窗口失败:', error);
@@ -855,6 +856,11 @@ export default function TransformEditor() {
         exportDuration,
         ease,
         selectedGameFolder
+      });
+
+      // 同时发送选中的索引
+      await emit('script-output:selected-indexes-updated', {
+        selectedIndexes: selectedIndexes
       });
     } catch (error) {
       console.error('更新脚本输出窗口失败:', error);
@@ -1059,7 +1065,7 @@ export default function TransformEditor() {
     if (Array.isArray(transforms)) {
       updateScriptOutputWindow();
     }
-  }, [outputScriptLines, transforms, scaleX, scaleY, canvasWidth, canvasHeight, baseWidth, baseHeight, exportDuration, ease, selectedGameFolder]);
+  }, [outputScriptLines, transforms, scaleX, scaleY, canvasWidth, canvasHeight, baseWidth, baseHeight, exportDuration, ease, selectedGameFolder, selectedIndexes]);
 
   // 当 transforms、selectedIndexes 或 applyFilterToBg 变化时，更新滤镜编辑器窗口
   useEffect(() => {
@@ -2098,6 +2104,20 @@ export default function TransformEditor() {
                 } else {
                   copy[index].transform.scale.y = newScale;
                 }
+                return copy;
+              });
+            }}
+            onChangeMotion={(index, newMotion) => {
+              setTransforms((prev) => {
+                const copy = [...prev];
+                copy[index] = { ...copy[index], motion: newMotion || undefined };
+                return copy;
+              });
+            }}
+            onChangeExpression={(index, newExpression) => {
+              setTransforms((prev) => {
+                const copy = [...prev];
+                copy[index] = { ...copy[index], expression: newExpression || undefined };
                 return copy;
               });
             }}
