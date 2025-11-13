@@ -7,6 +7,7 @@ export default function FilterEditorWindow() {
   const [transforms, setTransforms] = useState<TransformData[]>([]);
   const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
   const [applyFilterToBg, setApplyFilterToBg] = useState(false);
+  const [selectedGameFolder, setSelectedGameFolder] = useState<string | null>(null);
   const isReceivingUpdateRef = useRef(false); // 标记是否正在接收来自主窗口的更新
   const isInitializedRef = useRef(false); // 标记是否已经初始化（接收过第一次数据）
 
@@ -17,6 +18,7 @@ export default function FilterEditorWindow() {
         transforms: TransformData[];
         selectedIndexes: number[];
         applyFilterToBg: boolean;
+        selectedGameFolder?: string | null;
       }>('filter-editor:update-data', (event) => {
         // 检查数据有效性
         if (event.payload && Array.isArray(event.payload.transforms)) {
@@ -24,6 +26,10 @@ export default function FilterEditorWindow() {
           setTransforms(event.payload.transforms);
           setSelectedIndexes(event.payload.selectedIndexes || []);
           setApplyFilterToBg(event.payload.applyFilterToBg || false);
+          // 更新游戏文件夹路径（用于加载 JSONL）
+          if (event.payload.selectedGameFolder !== undefined) {
+            setSelectedGameFolder(event.payload.selectedGameFolder);
+          }
           isInitializedRef.current = true; // 标记已初始化
           // 重置标记
           setTimeout(() => {
@@ -85,6 +91,7 @@ export default function FilterEditorWindow() {
         selectedIndexes={selectedIndexes}
         applyFilterToBg={applyFilterToBg}
         setApplyFilterToBg={setApplyFilterToBg}
+        selectedGameFolder={selectedGameFolder}
       />
     </div>
   );

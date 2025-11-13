@@ -1,4 +1,6 @@
 import { TransformData } from "../types/transform";
+import { useState, useEffect } from "react";
+import { extractMotionsAndExpressions } from "../utils/jsonlParser";
 
 interface RotationPanelProps {
     transforms: TransformData[];
@@ -8,6 +10,8 @@ interface RotationPanelProps {
     onChangeId: (index: number, newId: string) => void;              // 新增
     onChangeEase: (index: number, newEase: string) => void;         // 新增：ease 设置
     onChangeScale: (index: number, axis: 'x' | 'y', newScale: number) => void; // 新增：scale 设置
+    onChangeMotion?: (index: number, newMotion: string) => void;   // 新增：motion 设置
+    onChangeExpression?: (index: number, newExpression: string) => void; // 新增：expression 设置
 }
 
 export default function RotationPanel({
@@ -17,7 +21,55 @@ export default function RotationPanel({
                                           onChangeTarget,
                                           onChangeEase,
                                           onChangeScale,
+                                          onChangeMotion,
+                                          onChangeExpression,
                                       }: RotationPanelProps) {
+    // 存储每个 changeFigure 的 motions 和 expressions 列表
+    const [motionsMap, setMotionsMap] = useState<Map<string, string[]>>(new Map());
+    const [expressionsMap, setExpressionsMap] = useState<Map<string, string[]>>(new Map());
+
+    // 当选中项变化时，加载对应的 motions 和 expressions
+    useEffect(() => {
+        const loadMotionsAndExpressions = async () => {
+            const newMotionsMap = new Map(motionsMap);
+            const newExpressionsMap = new Map(expressionsMap);
+
+            for (const index of selectedIndexes) {
+                const t = transforms[index];
+                if (t.type === 'changeFigure' && t.path) {
+                    // 检查是否是 JSONL 文件
+                    const isJsonl = t.path.toLowerCase().endsWith('.jsonl');
+                    if (isJsonl && !newMotionsMap.has(t.path)) {
+                        try {
+                            const { motions, expressions } = await extractMotionsAndExpressions(t.path);
+                            newMotionsMap.set(t.path, motions);
+                            newExpressionsMap.set(t.path, expressions);
+                        } catch (error) {
+                            console.warn(`加载 motions/expressions 失败 (${t.path}):`, error);
+                            newMotionsMap.set(t.path, []);
+                            newExpressionsMap.set(t.path, []);
+                        }
+                    }
+                }
+            }
+
+            setMotionsMap(newMotionsMap);
+            setExpressionsMap(newExpressionsMap);
+        };
+
+        loadMotionsAndExpressions();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedIndexes, transforms]);
+
+    const getMotions = (path: string | undefined): string[] => {
+        if (!path) return [];
+        return motionsMap.get(path) || [];
+    };
+
+    const getExpressions = (path: string | undefined): string[] => {
+        if (!path) return [];
+        return expressionsMap.get(path) || [];
+    };
     return (
         <div style={{ marginTop: 20 }}>
             <h3>Rotation（单位：弧度）</h3>
@@ -166,6 +218,82 @@ export default function RotationPanel({
                     </div>
                 );
             })}
+
+            {/* Live2D Motion 和 Expression 选择器（仅对 changeFigure 类型显示） */}
+            {selectedIndexes.some(idx => transforms[idx]?.type === 'changeFigure') && (
+                <>
+                    <h3 style={{ marginTop: 30 }}>Live2D 动作和表情</h3>
+                    
+                    {selectedIndexes.map((index) => {
+                        const t = transforms[index];
+                        if (t.type !== 'changeFigure') return null;
+
+                        const isJsonl = t.path?.toLowerCase().endsWith('.jsonl');
+                        const motions = isJsonl ? getMotions(t.path) : [];
+                        const expressions = isJsonl ? getExpressions(t.path) : [];
+                        const currentMotion = t.motion || '';
+                        const currentExpression = t.expression || '';
+
+                        return (
+                            <div key={`live2d-${index}`} style={{ marginBottom: 10, padding: "8px 10px", border: "1px solid #eee", borderRadius: 6 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                    {/* target 显示（只读） */}
+                                    <label>
+                                        target:
+                                        <span style={{ marginLeft: 6, fontWeight: "bold", color: "#333" }}>
+                                            {t.target}
+                                        </span>
+                                    </label>
+
+                                    {/* Motion 选择器 */}
+                                    {isJsonl && onChangeMotion && (
+                                        <label>
+                                            Motion:
+                                            <select
+                                                value={currentMotion}
+                                                onChange={(e) => onChangeMotion(index, e.target.value)}
+                                                style={{ marginLeft: 6, minWidth: 150 }}
+                                            >
+                                                <option value="">无动作</option>
+                                                {motions.map((motion) => (
+                                                    <option key={motion} value={motion}>
+                                                        {motion}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                    )}
+
+                                    {/* Expression 选择器 */}
+                                    {isJsonl && onChangeExpression && (
+                                        <label>
+                                            Expression:
+                                            <select
+                                                value={currentExpression}
+                                                onChange={(e) => onChangeExpression(index, e.target.value)}
+                                                style={{ marginLeft: 6, minWidth: 150 }}
+                                            >
+                                                <option value="">无表情</option>
+                                                {expressions.map((expression) => (
+                                                    <option key={expression} value={expression}>
+                                                        {expression}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                    )}
+
+                                    {!isJsonl && (
+                                        <span style={{ color: "#999", fontSize: "12px" }}>
+                                            （仅 JSONL 文件支持动作和表情选择）
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </>
+            )}
         </div>
     );
 }

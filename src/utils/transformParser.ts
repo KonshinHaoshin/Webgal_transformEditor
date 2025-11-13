@@ -116,13 +116,18 @@ export function exportScript(
             const roundedTransform = roundTransform(transform);
             const transformJson = JSON.stringify(roundedTransform);
 
-            // extras：无值参数输出成 "-k"，有值参数输出 "-k=v"
+            // 处理 motion 和 expression 参数（确保值存在且不为空字符串）
+            const motionFlag = (obj.motion && obj.motion.trim() !== '') ? ` -motion=${obj.motion}` : '';
+            const expressionFlag = (obj.expression && obj.expression.trim() !== '') ? ` -expression=${obj.expression}` : '';
+            
+            // extras：无值参数输出成 "-k"，有值参数输出 "-k=v"（排除 motion 和 expression，因为它们已经单独处理）
             const extras = Object.entries(obj.extraParams || {})
+                .filter(([k]) => k !== 'motion' && k !== 'expression') // 排除 motion 和 expression
                 .map(([k, v]) => (v === "" || v === undefined) ? ` -${k}` : ` -${k}=${v}`)
                 .join("");
 
             const presetFlag = obj.presetPosition && obj.presetPosition !== 'center' ? ` -${obj.presetPosition}` : '';
-            return `changeFigure:${obj.path} -id=${obj.target} -transform=${transformJson}${extras}${presetFlag};`;
+            return `changeFigure:${obj.path} -id=${obj.target} -transform=${transformJson}${motionFlag}${expressionFlag}${extras}${presetFlag};`;
         }
         if (obj.type=="changeBg")
         {
@@ -150,6 +155,7 @@ export function buildAnimationSequence(transforms: TransformData[], transformInd
     startTime: number;
     endTime: number;
     scriptLineIndex?: number; // 对应的脚本行索引（用于断点）
+    waitForMotion?: boolean; // 标记是否等待 motion 完成
 }> {
     const animationSequence: Array<{
         target: string;
@@ -160,6 +166,7 @@ export function buildAnimationSequence(transforms: TransformData[], transformInd
         startTime: number;
         endTime: number;
         scriptLineIndex?: number;
+        waitForMotion?: boolean;
     }> = [];
     
     // Map<figureID, { changeFigure, setTransforms[] }>
@@ -167,6 +174,15 @@ export function buildAnimationSequence(transforms: TransformData[], transformInd
         changeFigure?: TransformData;
         setTransforms: TransformData[];
     }>();
+    
+    // 按顺序收集所有 changeFigure（用于创建 motion 等待条目）
+    const changeFiguresInOrder: Array<{ transform: TransformData; index: number }> = [];
+    for (let i = 0; i < transforms.length; i++) {
+        const transform = transforms[i];
+        if (transform.type === 'changeFigure' && transform.motion) {
+            changeFiguresInOrder.push({ transform, index: i });
+        }
+    }
     
     // 收集每个 figureID 的所有相关命令（包括背景）
     for (const transform of transforms) {
@@ -302,8 +318,58 @@ export function buildAnimationSequence(transforms: TransformData[], transformInd
         seqStart = k;
     }
     
-    // 按顺序处理每个 setTransform
+    // 按顺序处理每个 changeFigure（如果有 motion，创建等待条目）
     let currentTime = 0;
+    let changeFigureIndex = 0;
+    
+    // 在处理 setTransform 之前，先处理 changeFigure 的 motion 等待
+    while (changeFigureIndex < changeFiguresInOrder.length) {
+        const { transform: changeFigure, index } = changeFiguresInOrder[changeFigureIndex];
+        const target = changeFigure.target;
+        if (!target) {
+            changeFigureIndex++;
+            continue;
+        }
+        
+        // 检查这个 changeFigure 之后是否有 setTransform
+        // 如果有，需要等待 motion 完成
+        let hasSetTransformAfter = false;
+        for (let j = index + 1; j < transforms.length; j++) {
+            const nextTransform = transforms[j];
+            if (nextTransform.type === 'setTransform' && nextTransform.target === target) {
+                hasSetTransformAfter = true;
+                break;
+            }
+            // 如果遇到下一个 changeFigure（相同或不同 target），停止检查
+            if (nextTransform.type === 'changeFigure') {
+                break;
+            }
+        }
+        
+        // 如果有后续的 setTransform，创建等待条目
+        if (hasSetTransformAfter && changeFigure.motion) {
+            // Live2D motion 通常持续 3 秒（根据 applyMotion 中的参数）
+            const motionDuration = 3000; // 3 秒
+            
+            animationSequence.push({
+                target: target,
+                duration: motionDuration,
+                ease: 'linear',
+                startState: JSON.parse(JSON.stringify(changeFigure.transform)),
+                endState: JSON.parse(JSON.stringify(changeFigure.transform)),
+                startTime: currentTime,
+                endTime: currentTime + motionDuration,
+                waitForMotion: true // 标记为等待 motion 完成
+            });
+            
+            currentTime += motionDuration;
+            console.log(`🎬 为 changeFigure (target=${target}, motion=${changeFigure.motion}) 创建等待条目，等待 ${motionDuration}ms`);
+        }
+        
+        changeFigureIndex++;
+    }
+    
+    // 按顺序处理每个 setTransform
     let i = 0;
     
     while (i < allSetTransforms.length) {
@@ -609,29 +675,18 @@ export function applyFigureIDSystem(transforms: TransformData[]): TransformData[
             result.push(transform);
         } else {
             // changeFigure：保持原始状态，不合并 setTransform 的 transform
+            // 注意：允许同一个 figureID 有多个 changeFigure（因为可能有不同的 motion/expression）
             const figureID = transform.target;
             if (figureID && figureID !== 'bg-main') {
-                // 检查是否已经添加过该 figureID 的 changeFigure
-                const alreadyAdded = result.some(
-                    (t) => t.type === 'changeFigure' && t.target === figureID
-                );
-                if (!alreadyAdded) {
-                    // 保持原始 changeFigure 状态，不合并 setTransform
-                    result.push(transform);
-                }
+                // 直接添加所有 changeFigure，不进行去重
+                // 因为每个 changeFigure 可能代表不同的状态（不同的 motion/expression）
+                result.push(transform);
             }
         }
     }
     
-    // 添加那些在原始序列中从未出现过的 figure（不应该发生，但保险起见）
-    figureStates.forEach((state, figureID) => {
-        const alreadyAdded = result.some(
-            (t) => t.type === 'changeFigure' && t.target === figureID
-        );
-        if (!alreadyAdded) {
-            result.push(state);
-        }
-    });
+    // 注意：不再需要添加那些在原始序列中从未出现过的 figure
+    // 因为我们已经保留了所有的 changeFigure，包括它们的 motion 和 expression
     
     return result;
 }
@@ -788,6 +843,10 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
             // 更新 target 的状态为 changeFigure 的 transform
             targetStates.set(target, transform);
 
+            // 提取 motion 和 expression
+            const motion = params.motion || undefined;
+            const expression = params.expression || undefined;
+
             return {
                 type: "changeFigure",
                 path,
@@ -795,8 +854,10 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
                 duration: 0,
                 transform,
                 presetPosition, // ✅ 记录预设位
+                motion, // ✅ 记录 motion
+                expression, // ✅ 记录 expression
                 extraParams: Object.fromEntries(
-                    Object.entries(params).filter(([k]) => k !== "id" && k !== "transform")
+                    Object.entries(params).filter(([k]) => k !== "id" && k !== "transform" && k !== "motion" && k !== "expression")
                 )
             };
         }

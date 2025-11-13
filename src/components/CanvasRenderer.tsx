@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useMemo } from "react";
 import * as PIXI from "pixi.js";
 import { TransformData } from "../types/transform";
 import { PixiContainer } from "../containers/pixiContainer.ts";
@@ -166,6 +166,75 @@ export default function CanvasRenderer(props: Props) {
             window.removeEventListener('blur', handleBlur);
         };
     }, []);
+
+    // 使用 useMemo 缓存每个 target 的最后一个 changeFigure（只对 motion 和 expression 有效）
+    const lastChangeFigureForMotionExpression = useMemo(() => {
+        const lastChangeFigureMap = new Map<string, TransformData>();
+
+        // 如果有断点，只考虑断点之前的 transforms
+        const effectiveTransforms = breakpoints && breakpoints.size > 0
+            ? transforms.filter((_, index) => {
+                // 检查这个 transform 对应的脚本行是否在断点之前
+                // 这里简化处理：直接使用索引，假设每个 transform 对应一行脚本
+                return !Array.from(breakpoints).some(bp => index >= bp);
+            })
+            : transforms;
+
+        // 从后往前遍历，找到每个 target 的最后一个 changeFigure
+        for (let i = effectiveTransforms.length - 1; i >= 0; i--) {
+            const transform = effectiveTransforms[i];
+            if (transform.type === 'changeFigure' && transform.target) {
+                const target = transform.target;
+                if (!lastChangeFigureMap.has(target)) {
+                    lastChangeFigureMap.set(target, transform);
+                }
+            }
+        }
+
+        return lastChangeFigureMap;
+    }, [transforms, breakpoints]);
+
+    // 使用 ref 来跟踪上一次应用的 motion/expression，避免重复应用
+    const lastAppliedMotionExpressionRef = useRef<Map<string, { motion?: string; expression?: string }>>(new Map());
+
+    // 监听 motion 和 expression 的变化，应用到 Live2D 模型
+    useEffect(() => {
+        // 只对最后一个 changeFigure 应用 motion 和 expression
+        for (const [target, transform] of lastChangeFigureForMotionExpression) {
+            const motion = transform.motion;
+            const expression = transform.expression;
+
+            // 检查是否和上一次应用的值相同，如果相同则跳过
+            const lastApplied = lastAppliedMotionExpressionRef.current.get(target);
+            if (lastApplied &&
+                lastApplied.motion === motion &&
+                lastApplied.expression === expression) {
+                // 值没有变化，跳过
+                continue;
+            }
+
+            // 更新记录
+            lastAppliedMotionExpressionRef.current.set(target, { motion, expression });
+
+            // 应用 motion（只对最后一个 changeFigure）
+            if (motion !== undefined && motion !== '') {
+                figureManager.applyMotion(target, motion);
+            }
+
+            // 应用 expression（只对最后一个 changeFigure）
+            if (expression !== undefined && expression !== '') {
+                figureManager.applyExpression(target, expression);
+            }
+        }
+
+        // 清理不再存在的 target 的记录
+        const currentTargets = new Set(lastChangeFigureForMotionExpression.keys());
+        for (const target of lastAppliedMotionExpressionRef.current.keys()) {
+            if (!currentTargets.has(target)) {
+                lastAppliedMotionExpressionRef.current.delete(target);
+            }
+        }
+    }, [lastChangeFigureForMotionExpression]);
 
     useEffect(() => {
         if (!canvasRef.current) return;

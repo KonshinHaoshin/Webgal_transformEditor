@@ -172,6 +172,11 @@ export class WebGALFileManager {
         return this.gameFolder;
     }
 
+    // 公开 gameFolder 属性供其他模块访问
+    get gameFolderPath(): string | null {
+        return this.gameFolder;
+    }
+
     parseChangeFigureCommand(command: string): string | null {
         const match = command.match(/changeFigure:\s*([^\s,]+)/i);
         return match ? match[1] : null;

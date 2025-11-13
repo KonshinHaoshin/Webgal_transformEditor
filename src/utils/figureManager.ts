@@ -473,6 +473,80 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
   isLive2DAvailable(): boolean {
     return this.live2DManager?.isAvailable || false;
   }
+
+  // 应用 motion 到 Live2D 模型
+  applyMotion(key: string, motion: string | undefined): void {
+    const figure = this.figures.get(key);
+    if (!figure) return;
+
+    if (figure.sourceType === 'live2d' || figure.sourceType === 'jsonl') {
+      const model = figure.displayObject;
+      if (model) {
+        // 如果是 JSONL（容器），需要遍历所有子模型
+        if (figure.sourceType === 'jsonl' && model.children) {
+          for (const child of model.children) {
+            if (child && typeof (child as any).motion === 'function') {
+              if (motion) {
+                try {
+                  (child as any).motion(motion, 0, 3);
+                  console.log(`✅ 已应用 motion "${motion}" 到 ${key}`);
+                } catch (e) {
+                  console.warn(`应用 motion 失败 (${key}):`, e);
+                }
+              }
+            }
+          }
+        } else if (typeof (model as any).motion === 'function') {
+          // 单个 Live2D 模型
+          if (motion) {
+            try {
+              (model as any).motion(motion, 0, 3);
+              console.log(`✅ 已应用 motion "${motion}" 到 ${key}`);
+            } catch (e) {
+              console.warn(`应用 motion 失败 (${key}):`, e);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 应用 expression 到 Live2D 模型
+  applyExpression(key: string, expression: string | undefined): void {
+    const figure = this.figures.get(key);
+    if (!figure) return;
+
+    if (figure.sourceType === 'live2d' || figure.sourceType === 'jsonl') {
+      const model = figure.displayObject;
+      if (model) {
+        // 如果是 JSONL（容器），需要遍历所有子模型
+        if (figure.sourceType === 'jsonl' && model.children) {
+          for (const child of model.children) {
+            if (child && typeof (child as any).expression === 'function') {
+              if (expression) {
+                try {
+                  (child as any).expression(expression);
+                  console.log(`✅ 已应用 expression "${expression}" 到 ${key}`);
+                } catch (e) {
+                  console.warn(`应用 expression 失败 (${key}):`, e);
+                }
+              }
+            }
+          }
+        } else if (typeof (model as any).expression === 'function') {
+          // 单个 Live2D 模型
+          if (expression) {
+            try {
+              (model as any).expression(expression);
+              console.log(`✅ 已应用 expression "${expression}" 到 ${key}`);
+            } catch (e) {
+              console.warn(`应用 expression 失败 (${key}):`, e);
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 // 导出单例
