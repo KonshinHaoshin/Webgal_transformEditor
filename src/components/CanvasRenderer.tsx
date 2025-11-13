@@ -202,7 +202,7 @@ export default function CanvasRenderer(props: Props) {
         // 只对最后一个 changeFigure 应用 motion 和 expression
         for (const [target, transform] of lastChangeFigureForMotionExpression) {
             const motion = transform.motion;
-            const expression = transform.expression;
+            const {expression} = transform;
 
             // 检查是否和上一次应用的值相同，如果相同则跳过
             const lastApplied = lastAppliedMotionExpressionRef.current.get(target);
