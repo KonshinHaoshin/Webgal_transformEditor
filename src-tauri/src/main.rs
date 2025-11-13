@@ -189,21 +189,22 @@ fn scan_directory_recursive(dir_path: String) -> Result<Vec<String>, String> {
                 else if ext_lower.as_str() == "json" {
                     if let Ok(content) = fs::read_to_string(&path) {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                            // 检查是否包含 model, textures, motions 字段
+                            let mut is_live2d_file = false;
+                            let parent_dir = path.parent();
+                            
+                            // 检查是否包含 model, textures, motions 字段（Cubism 2 格式）
                             if json.get("model").is_some() || 
                                json.get("textures").is_some() || 
                                json.get("motions").is_some() {
-                                let relative_path = path.strip_prefix(base_dir)
-                                    .map_err(|e| format!("计算相对路径失败: {}", e))?;
-                                let relative_str = relative_path.to_string_lossy().replace('\\', "/");
+                                is_live2d_file = true;
                                 
                                 // 提取 textures 并加入排除列表
                                 if let Some(textures) = json.get("textures").and_then(|t| t.as_array()) {
                                     for texture in textures {
                                         if let Some(tex_path) = texture.as_str() {
                                             // 使用 json 文件的父目录作为基准
-                                            if let Some(parent_dir) = path.parent() {
-                                                let tex_full_path = parent_dir.join(tex_path);
+                                            if let Some(parent) = parent_dir {
+                                                let tex_full_path = parent.join(tex_path);
                                                 if let Ok(tex_relative) = tex_full_path.strip_prefix(base_dir) {
                                                     excluded_files.insert(tex_relative.to_string_lossy().replace('\\', "/"));
                                                 }
@@ -211,6 +212,64 @@ fn scan_directory_recursive(dir_path: String) -> Result<Vec<String>, String> {
                                         }
                                     }
                                 }
+                            }
+                            // 检查是否包含 Version 和 FileReferences 字段（Cubism 3/4 格式）
+                            else if json.get("Version").is_some() && json.get("FileReferences").is_some() {
+                                is_live2d_file = true;
+                                
+                                // 提取 FileReferences 中的文件引用并加入排除列表
+                                if let Some(file_refs) = json.get("FileReferences").and_then(|fr| fr.as_object()) {
+                                    // 提取 Textures 数组中的贴图文件
+                                    if let Some(textures) = file_refs.get("Textures").and_then(|t| t.as_array()) {
+                                        for texture in textures {
+                                            if let Some(tex_path) = texture.as_str() {
+                                                if let Some(parent) = parent_dir {
+                                                    let tex_full_path = parent.join(tex_path);
+                                                    if let Ok(tex_relative) = tex_full_path.strip_prefix(base_dir) {
+                                                        excluded_files.insert(tex_relative.to_string_lossy().replace('\\', "/"));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    // 提取 Physics 文件（如果存在）
+                                    if let Some(physics) = file_refs.get("Physics").and_then(|p| p.as_str()) {
+                                        if let Some(parent) = parent_dir {
+                                            let physics_full_path = parent.join(physics);
+                                            if let Ok(physics_relative) = physics_full_path.strip_prefix(base_dir) {
+                                                excluded_files.insert(physics_relative.to_string_lossy().replace('\\', "/"));
+                                            }
+                                        }
+                                    }
+                                    
+                                    // 提取 DisplayInfo 文件（如果存在）
+                                    if let Some(display_info) = file_refs.get("DisplayInfo").and_then(|d| d.as_str()) {
+                                        if let Some(parent) = parent_dir {
+                                            let display_info_full_path = parent.join(display_info);
+                                            if let Ok(display_info_relative) = display_info_full_path.strip_prefix(base_dir) {
+                                                excluded_files.insert(display_info_relative.to_string_lossy().replace('\\', "/"));
+                                            }
+                                        }
+                                    }
+                                    
+                                    // 提取 Moc 文件（如果存在）
+                                    if let Some(moc) = file_refs.get("Moc").and_then(|m| m.as_str()) {
+                                        if let Some(parent) = parent_dir {
+                                            let moc_full_path = parent.join(moc);
+                                            if let Ok(moc_relative) = moc_full_path.strip_prefix(base_dir) {
+                                                excluded_files.insert(moc_relative.to_string_lossy().replace('\\', "/"));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // 如果是 Live2D 文件，添加到结果列表中
+                            if is_live2d_file {
+                                let relative_path = path.strip_prefix(base_dir)
+                                    .map_err(|e| format!("计算相对路径失败: {}", e))?;
+                                let relative_str = relative_path.to_string_lossy().replace('\\', "/");
                                 
                                 // 只添加未被排除的文件
                                 if !excluded_files.contains(&relative_str) {
