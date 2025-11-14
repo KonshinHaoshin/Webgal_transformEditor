@@ -115,21 +115,69 @@ export default function FilterEditor({
   // 获取所有可用的target ID列表（用于勾选）
   const availableTargetIds = useMemo(() => {
     const targets = new Set<string>();
+    let hasFigure = false;
+    let hasBg = false;
+    
     transforms.forEach(t => {
       if (t.type === 'changeFigure' || t.type === 'changeBg' || t.type === 'setTransform') {
-        if (t.target) targets.add(t.target);
+        if (t.target) {
+          targets.add(t.target);
+          // 检查是否有立绘（figure*）
+          if (t.target.startsWith('figure')) {
+            hasFigure = true;
+          }
+          // 检查是否有背景
+          if (t.target === 'bg-main') {
+            hasBg = true;
+          }
+        }
       }
     });
-    return Array.from(targets).sort();
+    
+    // 如果有立绘或背景，添加 stage-main 选项
+    if (hasFigure || hasBg) {
+      targets.add('stage-main');
+    }
+    
+    return Array.from(targets).sort((a, b) => {
+      // stage-main 排在最前面
+      if (a === 'stage-main') return -1;
+      if (b === 'stage-main') return 1;
+      return a.localeCompare(b);
+    });
   }, [transforms]);
+
+  // 判断 target 是否应该被应用（支持 stage-main）
+  const shouldApplyToTarget = useMemo(() => {
+    return (target: string | undefined): boolean => {
+      if (!target) return false;
+      
+      // 如果选择了 stage-main，应用到所有立绘和背景
+      if (selectedFilterTargets.has('stage-main')) {
+        return target.startsWith('figure') || target === 'bg-main';
+      }
+      
+      // 否则只应用选中的 target
+      return selectedFilterTargets.has(target);
+    };
+  }, [selectedFilterTargets]);
 
   // 首选"选中项的第一项"，否则使用第一个非背景项，否则就背景项
   const sourceTransform = useMemo(() => {
-    // 如果勾选了特定的ID，优先使用第一个勾选的ID
+    // 如果勾选了特定的ID，优先使用第一个勾选的ID（排除 stage-main）
     if (selectedFilterTargets.size > 0) {
-      const firstSelectedId = Array.from(selectedFilterTargets)[0];
-      const targetTransform = transforms.find(t => t.target === firstSelectedId);
-      if (targetTransform) return targetTransform.transform;
+      const firstSelectedId = Array.from(selectedFilterTargets).find(id => id !== 'stage-main') || Array.from(selectedFilterTargets)[0];
+      
+      // 如果选择的是 stage-main，优先使用第一个立绘，否则使用背景
+      if (firstSelectedId === 'stage-main') {
+        const firstFigure = transforms.find(t => t.target && t.target.startsWith('figure'));
+        if (firstFigure) return firstFigure.transform;
+        const bg = transforms.find(t => t.target === 'bg-main');
+        if (bg) return bg.transform;
+      } else {
+        const targetTransform = transforms.find(t => t.target === firstSelectedId);
+        if (targetTransform) return targetTransform.transform;
+      }
     }
     // 否则使用选中的索引
     if (selectedIndexes.length > 0) {
@@ -155,11 +203,24 @@ export default function FilterEditor({
     const firstNonBg = transforms.find(t => t.target !== "bg-main");
     return firstNonBg?.target || "未选择目标";
   }, [transforms, selectedIndexes, selectedFilterTargets]);
+  
+  // 获取当前选中的目标列表（用于显示）
+  const selectedTargetsDisplay = useMemo(() => {
+    if (selectedFilterTargets.has('stage-main')) {
+      const allTargets = availableTargetIds.filter(id => id !== 'stage-main' && (id.startsWith('figure') || id === 'bg-main'));
+      return `stage-main (${allTargets.length} 个目标: ${allTargets.join(', ')})`;
+    }
+    return Array.from(selectedFilterTargets).join(', ');
+  }, [selectedFilterTargets, availableTargetIds]);
 
-  // 当 availableTargetIds 变化时，如果没有勾选任何ID，自动勾选所有ID（默认全部启用）
+  // 当 availableTargetIds 变化时，如果没有勾选任何ID，自动勾选所有ID（默认全部启用，但不包括 stage-main）
   useEffect(() => {
     if (availableTargetIds.length > 0 && selectedFilterTargets.size === 0) {
-      setSelectedFilterTargets(new Set(availableTargetIds));
+      // 默认勾选所有非 stage-main 的目标
+      const defaultTargets = availableTargetIds.filter(id => id !== 'stage-main');
+      if (defaultTargets.length > 0) {
+        setSelectedFilterTargets(new Set(defaultTargets));
+      }
     } else if (availableTargetIds.length === 0) {
       setSelectedFilterTargets(new Set());
     } else {
@@ -413,8 +474,8 @@ export default function FilterEditor({
     
     setTransforms(prev =>
       prev.map((t) => {
-        // 只对勾选的target ID生效
-        const shouldApply = selectedFilterTargets.has(t.target || "");
+        // 使用 shouldApplyToTarget 判断是否应该应用（支持 stage-main）
+        const shouldApply = shouldApplyToTarget(t.target);
         
         if (!shouldApply) return t;
 
@@ -443,8 +504,8 @@ export default function FilterEditor({
     
     setTransforms(prev =>
       prev.map((t) => {
-        // 只对勾选的target ID生效
-        const shouldApply = selectedFilterTargets.has(t.target || "");
+        // 使用 shouldApplyToTarget 判断是否应该应用（支持 stage-main）
+        const shouldApply = shouldApplyToTarget(t.target);
         
         if (!shouldApply) return t;
 
@@ -534,8 +595,8 @@ export default function FilterEditor({
     // 应用预设到 transforms - 彻底完全替换滤镜参数
     setTransforms(prev =>
       prev.map((t) => {
-        // 只对勾选的target ID生效
-        const shouldApply = selectedFilterTargets.has(t.target || "");
+        // 使用 shouldApplyToTarget 判断是否应该应用（支持 stage-main）
+        const shouldApply = shouldApplyToTarget(t.target);
         
         if (!shouldApply) return t;
 
@@ -633,7 +694,7 @@ export default function FilterEditor({
       }}>
         <span style={{ fontSize: "14px", fontWeight: "600", color: "#1976d2" }}>🎯</span>
         <span style={{ fontSize: "14px", color: "#1976d2" }}>
-          正在编辑: <strong>{currentTargetName}</strong>
+          正在编辑: <strong>{selectedFilterTargets.size > 0 ? selectedTargetsDisplay : currentTargetName}</strong>
         </span>
       </div>
 
@@ -666,6 +727,7 @@ export default function FilterEditor({
                 (t.type === 'changeFigure' || t.type === 'changeBg') && t.target === target
               );
               const isBg = transform?.type === 'changeBg' || target === 'bg-main';
+              const isStageMain = target === 'stage-main';
               
               return (
                 <label 
@@ -684,7 +746,15 @@ export default function FilterEditor({
                     onChange={(e) => {
                       const newSelected = new Set(selectedFilterTargets);
                       if (e.target.checked) {
-                        newSelected.add(target);
+                        // 如果勾选 stage-main，取消勾选所有其他目标（避免混淆）
+                        if (isStageMain) {
+                          newSelected.clear();
+                          newSelected.add('stage-main');
+                        } else {
+                          // 如果勾选其他目标，取消勾选 stage-main（避免混淆）
+                          newSelected.delete('stage-main');
+                          newSelected.add(target);
+                        }
                       } else {
                         newSelected.delete(target);
                       }
@@ -693,10 +763,10 @@ export default function FilterEditor({
                     style={{ marginRight: "6px", cursor: "pointer" }}
                   />
                   <span style={{ 
-                    color: isBg ? "#e74c3c" : "#333",
-                    fontWeight: isBg ? "bold" : "normal"
+                    color: isStageMain ? "#9c27b0" : isBg ? "#e74c3c" : "#333",
+                    fontWeight: isStageMain ? "bold" : isBg ? "bold" : "normal"
                   }}>
-                    {target}
+                    {target}{isStageMain ? " (所有立绘和背景)" : ""}
                   </span>
                 </label>
               );

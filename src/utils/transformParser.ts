@@ -201,6 +201,16 @@ export function buildAnimationSequence(transforms: TransformData[], transformInd
         }
     }
     
+    // 收集所有 figure 和背景的 ID（用于展开 stage-main）
+    const allFigureIds = new Set<string>();
+    for (const transform of transforms) {
+        if (transform.type === 'changeFigure' || transform.type === 'changeBg') {
+            if (transform.target) {
+                allFigureIds.add(transform.target);
+            }
+        }
+    }
+    
     // 按顺序提取所有 setTransform（保持原始顺序）
     // 使用深拷贝确保每个 transform 对象都是独立的
     const allSetTransforms: TransformData[] = [];
@@ -208,9 +218,24 @@ export function buildAnimationSequence(transforms: TransformData[], transformInd
     for (let i = 0; i < transforms.length; i++) {
         const transform = transforms[i];
         if (transform.type === 'setTransform') {
-            // 深拷贝 transform 对象，确保每个 setTransform 都有独立的 transform 对象
-            allSetTransforms.push(JSON.parse(JSON.stringify(transform)));
-            allSetTransformsOriginalIndex.push(i); // 记录原始索引
+            // 如果 target 是 stage-main，展开为所有立绘和背景
+            if (transform.target === "stage-main") {
+                // 为所有立绘和背景创建 setTransform
+                for (const figureId of allFigureIds) {
+                    const expandedTransform: TransformData = {
+                        ...transform,
+                        target: figureId,
+                        // 深拷贝 transform 对象
+                        transform: JSON.parse(JSON.stringify(transform.transform))
+                    };
+                    allSetTransforms.push(expandedTransform);
+                    allSetTransformsOriginalIndex.push(i); // 使用相同的原始索引
+                }
+            } else {
+                // 深拷贝 transform 对象，确保每个 setTransform 都有独立的 transform 对象
+                allSetTransforms.push(JSON.parse(JSON.stringify(transform)));
+                allSetTransformsOriginalIndex.push(i); // 记录原始索引
+            }
         }
     }
     
@@ -558,6 +583,16 @@ export function applyFigureIDSystem(transforms: TransformData[]): TransformData[
     const figureStates = new Map<string, TransformData>();
     const result: TransformData[] = [];
     
+    // 收集所有 figure 和背景的 ID（用于展开 stage-main）
+    const allFigureIds = new Set<string>();
+    for (const transform of transforms) {
+        if (transform.type === 'changeFigure' || transform.type === 'changeBg') {
+            if (transform.target) {
+                allFigureIds.add(transform.target);
+            }
+        }
+    }
+    
     // 第一次遍历：处理所有 figure 相关的命令，计算最终状态（用于渲染）
     for (const transform of transforms) {
         // rawText 和 changeBg 跳过，后面再处理
@@ -610,6 +645,7 @@ export function applyFigureIDSystem(transforms: TransformData[]): TransformData[
             result.push(transform);
         } else if (transform.type === 'setTransform') {
             // setTransform：保留为独立命令，不合并
+            // 注意：stage-main 保持原始格式，不在解析时展开，只在渲染时展开
             result.push(transform);
         } else {
             // changeFigure：保持原始状态，不合并 setTransform 的 transform
@@ -718,12 +754,16 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
             }
 
             // 更新 target 的状态（使用深拷贝，避免引用问题）
-            targetStates.set(target, JSON.parse(JSON.stringify(transform)));
+            // 注意：对于 stage-main，我们不更新 targetStates，因为它在执行时才会展开
+            if (target !== "stage-main") {
+                targetStates.set(target, JSON.parse(JSON.stringify(transform)));
+            }
 
             // 解析 next 参数：如果存在 -next 参数（无论是否有值），next 为 true
             const next = "next" in params;
 
             // 返回时也使用深拷贝，确保每个 setTransform 都有独立的 transform 对象
+            // 对于 stage-main，保持原始格式，在执行时展开
             return {
                 type: "setTransform",
                 target: target,
