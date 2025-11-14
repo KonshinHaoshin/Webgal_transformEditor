@@ -523,7 +523,7 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
         if (figure.sourceType === 'jsonl' && model.children) {
           for (const child of model.children) {
             if (child && typeof (child as any).expression === 'function') {
-              if (expression) {
+              if (expression !== null && expression !== undefined && expression !== "") {
                 try {
                   (child as any).expression(expression);
                   console.log(`✅ 已应用 expression "${expression}" 到 ${key}`);
@@ -531,7 +531,7 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
                   console.warn(`应用 expression 失败 (${key}):`, e);
                 }
               } else {
-                // 清除 expression（回到默认）
+                // 清除 expression（回到默认，包括空字符串）
                 try {
                   (child as any).expression(null);
                   console.log(`✅ 已清除 expression 到 ${key}`);
