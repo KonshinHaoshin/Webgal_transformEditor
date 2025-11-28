@@ -1343,7 +1343,7 @@ export default function TransformEditor() {
   return (
     <div
       className="transform-editor-container"
-      style={{ maxHeight: "100vh", overflowY: "auto", padding: "20px", boxSizing: "border-box" }}
+      style={{ maxHeight: "100vh", overflowY: "auto", boxSizing: "border-box", margin: "0 auto" }}
     >
       <h2>EASTMOUNT WEBGAL TRANSFORM EDITOR</h2>
 

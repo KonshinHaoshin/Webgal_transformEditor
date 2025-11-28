@@ -1,7 +1,7 @@
 [package]
 name = "transformeditor"
-version = "1.2.3"
-description = "A Tauri App"
+version = "1.2.4"
+description = "WebGAL Transform Editor - A visual script editor for WebGAL game engine with transform editing capabilities for figures and backgrounds"
 authors = ["DongshanRandeng"]
 edition = "2021"
 
