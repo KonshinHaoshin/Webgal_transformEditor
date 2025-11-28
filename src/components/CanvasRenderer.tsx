@@ -93,6 +93,71 @@ export default function CanvasRenderer(props: Props) {
         return -1;
     }
 
+    // 辅助函数：找到影响某个 target 的 stage-main setTransform（即在该 target 的 changeFigure/changeBg 之前出现的最后一个 stage-main）
+    function findAffectingStageMain(transforms: TransformData[], target: string): number {
+        // 首先找到该 target 的最后一个 changeFigure/changeBg 的索引
+        let targetLastChangeIndex = -1;
+        for (let i = 0; i < transforms.length; i++) {
+            const t = transforms[i];
+            if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target === target) {
+                targetLastChangeIndex = i;
+            }
+        }
+        
+        // 如果没找到 changeFigure/changeBg，返回 -1
+        if (targetLastChangeIndex === -1) {
+            return -1;
+        }
+        
+        // 从后往前查找在该 changeFigure/changeBg 之前的最后一个 stage-main
+        for (let i = targetLastChangeIndex - 1; i >= 0; i--) {
+            const t = transforms[i];
+            if (t.type === 'setTransform' && t.target === 'stage-main') {
+                return i;
+            }
+        }
+        
+        return -1;
+    }
+
+    // 辅助函数：找到影响一组被操作对象的 stage-main（如果所有对象都受同一个 stage-main 影响，返回该 stage-main 的索引；否则返回 -1）
+    function findCommonAffectingStageMain(transforms: TransformData[], targetIndices: number[]): number {
+        if (targetIndices.length === 0) return -1;
+        
+        // 找到所有被操作对象对应的 target
+        const targets = new Set<string>();
+        for (const idx of targetIndices) {
+            const t = transforms[idx];
+            if (t && (t.type === 'changeFigure' || t.type === 'changeBg') && t.target) {
+                targets.add(t.target);
+            }
+        }
+        
+        if (targets.size === 0) return -1;
+        
+        // 找到影响每个 target 的 stage-main
+        const affectingStageMains = new Map<string, number>();
+        for (const target of targets) {
+            const stageMainIdx = findAffectingStageMain(transforms, target);
+            if (stageMainIdx !== -1) {
+                affectingStageMains.set(target, stageMainIdx);
+            }
+        }
+        
+        // 如果所有 target 都受同一个 stage-main 影响，返回该 stage-main 的索引
+        const stageMainIndices = Array.from(affectingStageMains.values());
+        if (stageMainIndices.length === 0) return -1;
+        
+        // 检查是否所有索引都相同
+        const firstIdx = stageMainIndices[0];
+        if (stageMainIndices.every(idx => idx === firstIdx)) {
+            return firstIdx;
+        }
+        
+        // 如果受不同的 stage-main 影响，返回 -1（不统一更新 stage-main）
+        return -1;
+    }
+
     // 辅助函数：查找某个 target 在断点之前的所有 setTransform 索引
     function findAllSetTransformsBeforeBreakpoint(transforms: TransformData[], target: string, hasBreakpoint: boolean): number[] {
         const indices: number[] = [];
@@ -665,30 +730,50 @@ export default function CanvasRenderer(props: Props) {
             }
         }
         
-        // 构建 target 到 setTransform 的映射（使用最后一个 setTransform）
-        // 从后往前遍历，确保保存的是最后一个 setTransform
+        // 构建 target 到 setTransform 的映射
+        // 对于 stage-main：只影响在它之前的 changeFigure/changeBg
         const setTransformMap = new Map<string, TransformData>();
+        
+        // 首先，找到每个 target 的最后一个 changeFigure/changeBg 的索引
+        const targetToLastChangeIndex = new Map<string, number>();
+        for (let i = 0; i < transforms.length; i++) {
+            const t = transforms[i];
+            if ((t.type === "changeFigure" || t.type === "changeBg") && t.target) {
+                targetToLastChangeIndex.set(t.target, i);
+            }
+        }
+        
+        // 然后，找到每个 target 的最后一个普通 setTransform（非 stage-main）
         for (let i = transforms.length - 1; i >= 0; i--) {
             const t = transforms[i];
-            if (t.type === "setTransform" && t.target) {
-                // 如果 target 是 stage-main，展开为所有立绘和背景
-                if (t.target === "stage-main") {
-                    for (const figureId of allFigureIds) {
-                        // 只有当这个 figure 还没有被映射过时才添加
-                        if (!setTransformMap.has(figureId)) {
-                            const expandedTransform: TransformData = {
-                                ...t,
-                                target: figureId,
-                                // 深拷贝 transform 对象
-                                transform: JSON.parse(JSON.stringify(t.transform))
-                            };
-                            setTransformMap.set(figureId, expandedTransform);
-                        }
-                    }
-                } else {
-                    // 普通 target，正常处理
-                    if (!setTransformMap.has(t.target)) {
-                        setTransformMap.set(t.target, t);
+            if (t.type === "setTransform" && t.target && t.target !== "stage-main") {
+                if (!setTransformMap.has(t.target)) {
+                    setTransformMap.set(t.target, t);
+                }
+            }
+        }
+        
+        // 最后，处理 stage-main：找到影响所有对象的 stage-main（最后一个）
+        // stage-main 将整个场景视为一个整体进行变换
+        let stageMainTransform: TransformData | null = null;
+        for (let i = transforms.length - 1; i >= 0; i--) {
+            const t = transforms[i];
+            if (t.type === "setTransform" && t.target === "stage-main") {
+                stageMainTransform = t;
+                break; // 找到最后一个 stage-main
+            }
+        }
+        
+        // 找出受 stage-main 影响的所有 target（在 stage-main 之前出现的）
+        const targetsAffectedByStageMain = new Set<string>();
+        if (stageMainTransform) {
+            const stageMainIndex = transforms.findIndex(t => t === stageMainTransform);
+            for (const [target, lastChangeIndex] of targetToLastChangeIndex.entries()) {
+                // 如果该 target 的最后一个 changeFigure/changeBg 在这个 stage-main 之前
+                if (lastChangeIndex < stageMainIndex) {
+                    // 只有当这个 target 还没有被其他 setTransform 映射过时才受 stage-main 影响
+                    if (!setTransformMap.has(target)) {
+                        targetsAffectedByStageMain.add(target);
                     }
                 }
             }
@@ -716,6 +801,10 @@ export default function CanvasRenderer(props: Props) {
                 targetsToRender.unshift(t); // 保持顺序，但只保留最后一个
             }
         }
+
+        // 创建 stage 容器，用于包含所有受 stage-main 影响的对象
+        const stageContainer = new PIXI.Container();
+        stageContainer.name = "stage-main-container";
 
         targetsToRender.forEach((t, index) => {
             // 跳过 rawText 类型，不渲染任何内容
@@ -1455,12 +1544,106 @@ export default function CanvasRenderer(props: Props) {
 
             spriteMap.current[t.target] = container;
             // 直接添加到stage，保持对象可交互
-            if (isBg) {
-                stage.addChildAt(container, 0); // 背景始终最底层
+            // 判断是否受 stage-main 影响
+            const isAffectedByStageMain = targetsAffectedByStageMain.has(t.target);
+            
+            if (isAffectedByStageMain) {
+                // 受 stage-main 影响的对象，添加到 stageContainer
+                if (isBg) {
+                    stageContainer.addChildAt(container, 0); // 背景始终最底层
+                } else {
+                    stageContainer.addChild(container);
+                }
             } else {
-                stage.addChild(container);
+                // 不受 stage-main 影响的对象，直接添加到 stage
+                if (isBg) {
+                    stage.addChildAt(container, 0); // 背景始终最底层
+                } else {
+                    stage.addChild(container);
+                }
             }
         });
+        
+        // 如果有 stage-main，对 stageContainer 应用 transform
+        if (stageMainTransform && stageMainTransform.transform && stageContainer.children.length > 0) {
+            const transform = stageMainTransform.transform;
+            
+            // 计算所有受 stage-main 影响对象的边界框，以确定场景的中心点
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            let hasObjects = false;
+            
+            stageContainer.children.forEach((child: any) => {
+                const container = child as any;
+                if (container.x !== undefined && container.y !== undefined) {
+                    hasObjects = true;
+                    // 考虑容器的大小来计算边界
+                    const bounds = container.getBounds();
+                    minX = Math.min(minX, bounds.left);
+                    maxX = Math.max(maxX, bounds.right);
+                    minY = Math.min(minY, bounds.top);
+                    maxY = Math.max(maxY, bounds.bottom);
+                }
+            });
+            
+            // 如果没有对象，使用画布中心
+            if (!hasObjects) {
+                minX = 0;
+                maxX = canvasWidth;
+                minY = 0;
+                maxY = canvasHeight;
+            }
+            
+            // 计算场景的中心点
+            const sceneCenterX = (minX + maxX) / 2;
+            const sceneCenterY = (minY + maxY) / 2;
+            
+            // 将容器内的对象的坐标转换为相对于场景中心的位置
+            stageContainer.children.forEach((child: any) => {
+                const container = child as any;
+                // 保存原始绝对位置
+                const originalX = container.x;
+                const originalY = container.y;
+                
+                // 转换为相对于场景中心的位置
+                container.x = originalX - sceneCenterX;
+                container.y = originalY - sceneCenterY;
+            });
+            
+            // stageContainer 的位置设置为场景中心 + stage-main 的 position 偏移
+            stageContainer.x = sceneCenterX;
+            stageContainer.y = sceneCenterY;
+            
+            // 对 stageContainer 应用 stage-main 的 transform
+            // position: 作为偏移量添加到 stageContainer 的位置
+            if (transform.position !== undefined) {
+                stageContainer.x += (transform.position.x || 0) * scaleX;
+                stageContainer.y += (transform.position.y || 0) * scaleY;
+            }
+            
+            // scale: 直接设置
+            if (transform.scale !== undefined) {
+                stageContainer.scale.set(transform.scale.x || 1, transform.scale.y || 1);
+            }
+            
+            // rotation: 直接设置（相对于场景中心旋转）
+            if (transform.rotation !== undefined) {
+                stageContainer.rotation = transform.rotation || 0;
+            }
+            
+            // 设置 pivot 点为中心，使旋转和缩放围绕场景中心进行
+            stageContainer.pivot.set(0, 0);
+            
+            // 将 stageContainer 添加到 stage（在背景之后）
+            const bgIndex = stage.children.findIndex((child: any) => {
+                const container = child;
+                return container && (container as any)._isBg === true;
+            });
+            if (bgIndex !== -1) {
+                stage.addChildAt(stageContainer, bgIndex + 1);
+            } else {
+                stage.addChildAt(stageContainer, 0);
+            }
+        }
         
         // 🎨 观察层：保持原始对象在stage上，在它们之上添加观察层
         if (overlayMode !== "none") {

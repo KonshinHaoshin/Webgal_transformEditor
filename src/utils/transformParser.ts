@@ -46,10 +46,75 @@ export function exportScript(
     const scaleRatioX = baseWidth / canvasWidth;
     const scaleRatioY = baseHeight / canvasHeight;
 
-    return transforms.map(obj => {
+    // 先找到所有在 stage-main 之前的 target
+    const targetToLastChangeIndex = new Map<string, number>();
+    for (let i = 0; i < transforms.length; i++) {
+        const t = transforms[i];
+        if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target) {
+            targetToLastChangeIndex.set(t.target, i);
+        }
+    }
+    
+    // 找到每个 target 的最后一个 changeFigure/changeBg，用于计算叠加后的位置
+    const targetToChangeFigure = new Map<string, TransformData>();
+    for (let i = transforms.length - 1; i >= 0; i--) {
+        const t = transforms[i];
+        if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target && !targetToChangeFigure.has(t.target)) {
+            targetToChangeFigure.set(t.target, t);
+        }
+    }
+
+    const result: string[] = [];
+    
+    for (let i = 0; i < transforms.length; i++) {
+        const obj = transforms[i];
+        
         // 如果是原始文本类型，直接返回原始文本
         if (obj.type === "rawText" && obj.rawText) {
-            return obj.rawText;
+            result.push(obj.rawText);
+            continue;
+        }
+
+        // stage-main 保持原样，不展开
+        if (obj.type === "setTransform" && obj.target === "stage-main") {
+            // 直接导出 stage-main 格式，不展开
+            // 应用缩放比例到 transform
+            const transform: any = {};
+            
+            if (obj.transform.position !== undefined) {
+                transform.position = {
+                    x: obj.transform.position.x * scaleRatioX,
+                    y: obj.transform.position.y * scaleRatioY,
+                };
+            }
+            
+            if (obj.transform.scale !== undefined) {
+                transform.scale = obj.transform.scale;
+            }
+            
+            if (obj.transform.rotation !== undefined) {
+                transform.rotation = obj.transform.rotation;
+            }
+            
+            // 添加所有其他属性（滤镜参数等）
+            for (const key in obj.transform) {
+                if (key !== 'position' && key !== 'scale' && key !== 'rotation') {
+                    transform[key] = obj.transform[key];
+                }
+            }
+            
+            const roundedTransform = roundTransform(transform);
+            const transformJson = JSON.stringify(roundedTransform);
+            
+            let easeParam = "";
+            if (obj.ease !== undefined && obj.ease !== "") {
+                easeParam = ` -ease=${obj.ease}`;
+            } else if (obj.ease === "" && defaultEase && defaultEase !== "default") {
+                easeParam = ` -ease=${defaultEase}`;
+            }
+            const nextParam = obj.next ? " -next" : "";
+            result.push(`setTransform:${transformJson} -target=stage-main -duration=${exportDuration}${easeParam}${nextParam};`);
+            continue;
         }
 
         // 构建导出用的 transform 对象，确保保留所有属性（包括滤镜参数）
@@ -100,7 +165,7 @@ export function exportScript(
             // 如果 transform 是空对象，导出 setTransform:{} 格式
             // 如果 next 为 true，添加 -next 参数
             const nextParam = obj.next ? " -next" : "";
-            return `setTransform:${transformJson} -target=${obj.target} -duration=${exportDuration}${easeParam}${nextParam};`;
+            result.push(`setTransform:${transformJson} -target=${obj.target} -duration=${exportDuration}${easeParam}${nextParam};`);
         }
 
         if (obj.type === "changeFigure") {
@@ -122,19 +187,41 @@ export function exportScript(
                 .join("");
 
             const presetFlag = obj.presetPosition && obj.presetPosition !== 'center' ? ` -${obj.presetPosition}` : '';
-            return `changeFigure:${obj.path} -id=${obj.target} -transform=${transformJson}${extras}${presetFlag};`;
+            result.push(`changeFigure:${obj.path} -id=${obj.target} -transform=${transformJson}${extras}${presetFlag};`);
         }
-        if (obj.type=="changeBg")
-        {
+        if (obj.type == "changeBg") {
+            // 构建导出用的 transform 对象
+            const transform: any = {};
+            if (obj.transform.position !== undefined) {
+                transform.position = {
+                    x: obj.transform.position.x * scaleRatioX,
+                    y: obj.transform.position.y * scaleRatioY,
+                };
+            }
+            if (obj.transform.scale !== undefined) {
+                transform.scale = obj.transform.scale;
+            }
+            if (obj.transform.rotation !== undefined) {
+                transform.rotation = obj.transform.rotation;
+            }
+            // 添加所有其他属性（滤镜参数等）
+            for (const key in obj.transform) {
+                if (key !== 'position' && key !== 'scale' && key !== 'rotation') {
+                    transform[key] = obj.transform[key];
+                }
+            }
+            const roundedTransform = roundTransform(transform);
+            const transformJson = JSON.stringify(roundedTransform);
+            
             // extras：无值参数输出成 "-k"，有值参数输出 "-k=v"
             const extras = Object.entries(obj.extraParams || {})
                 .map(([k, v]) => (v === "" || v === undefined) ? ` -${k}` : ` -${k}=${v}`)
                 .join("");
-            return `changeBg:${obj.path} -transform=${transformJson}${extras};`;
+            result.push(`changeBg:${obj.path} -transform=${transformJson}${extras};`);
         }
-
-        return "";
-    }).join("\n");
+    }
+    
+    return result.join("\n");
 }
 
 /**
@@ -215,21 +302,89 @@ export function buildAnimationSequence(transforms: TransformData[], transformInd
     // 使用深拷贝确保每个 transform 对象都是独立的
     const allSetTransforms: TransformData[] = [];
     const allSetTransformsOriginalIndex: number[] = []; // 记录每个 setTransform 在 transforms 中的原始索引
+    
+    // 首先，找到每个 target 的最后一个 changeFigure/changeBg 的索引
+    const targetToLastChangeIndex = new Map<string, number>();
+    for (let i = 0; i < transforms.length; i++) {
+        const t = transforms[i];
+        if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target) {
+            targetToLastChangeIndex.set(t.target, i);
+        }
+    }
+    
+    // 找到每个 target 的最后一个 changeFigure/changeBg，用于计算叠加后的位置
+    const targetToChangeFigure = new Map<string, TransformData>();
+    for (let i = transforms.length - 1; i >= 0; i--) {
+        const t = transforms[i];
+        if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target && !targetToChangeFigure.has(t.target)) {
+            targetToChangeFigure.set(t.target, t);
+        }
+    }
+    
     for (let i = 0; i < transforms.length; i++) {
         const transform = transforms[i];
         if (transform.type === 'setTransform') {
-            // 如果 target 是 stage-main，展开为所有立绘和背景
+            // 如果 target 是 stage-main，只展开到在它之前的 target，并叠加 transform
             if (transform.target === "stage-main") {
-                // 为所有立绘和背景创建 setTransform
-                for (const figureId of allFigureIds) {
-                    const expandedTransform: TransformData = {
-                        ...transform,
-                        target: figureId,
-                        // 深拷贝 transform 对象
-                        transform: JSON.parse(JSON.stringify(transform.transform))
-                    };
-                    allSetTransforms.push(expandedTransform);
-                    allSetTransformsOriginalIndex.push(i); // 使用相同的原始索引
+                // 只展开到在该 stage-main 之前出现的 target
+                for (const [target, lastChangeIndex] of targetToLastChangeIndex.entries()) {
+                    // 如果该 target 的最后一个 changeFigure/changeBg 在这个 stage-main 之前
+                    if (lastChangeIndex < i) {
+                        const changeFigure = targetToChangeFigure.get(target);
+                        if (!changeFigure) continue;
+                        
+                        // 获取该 target 的当前 transform（从 changeFigure）
+                        let currentTransform: any = {
+                            ...changeFigure.transform,
+                            position: changeFigure.transform.position || { x: 0, y: 0 },
+                            scale: changeFigure.transform.scale || { x: 1, y: 1 },
+                            rotation: changeFigure.transform.rotation || 0
+                        };
+                        
+                        // 检查是否有该 target 的普通 setTransform（在 stage-main 之前）
+                        for (let j = i - 1; j >= 0; j--) {
+                            const prevTransform = transforms[j];
+                            if (prevTransform.type === 'setTransform' && prevTransform.target === target) {
+                                // 使用该 setTransform 的 transform
+                                if (prevTransform.transform.position !== undefined) {
+                                    currentTransform.position = { ...prevTransform.transform.position };
+                                }
+                                if (prevTransform.transform.scale !== undefined) {
+                                    currentTransform.scale = { ...prevTransform.transform.scale };
+                                }
+                                if (prevTransform.transform.rotation !== undefined) {
+                                    currentTransform.rotation = prevTransform.transform.rotation;
+                                }
+                                break;
+                            }
+                        }
+                        
+                        // 将 stage-main 的 transform 叠加到当前 transform
+                        const finalTransform: any = {
+                            position: {
+                                x: (currentTransform.position.x || 0) + (transform.transform.position?.x || 0),
+                                y: (currentTransform.position.y || 0) + (transform.transform.position?.y || 0)
+                            },
+                            scale: {
+                                x: (currentTransform.scale.x || 1) * (transform.transform.scale?.x || 1),
+                                y: (currentTransform.scale.y || 1) * (transform.transform.scale?.y || 1)
+                            },
+                            rotation: (currentTransform.rotation || 0) + (transform.transform.rotation || 0)
+                        };
+                        
+                        console.log(`🎬 stage-main 展开: target=${target}`);
+                        console.log(`🎬   当前 transform: position=${JSON.stringify(currentTransform.position)}, scale=${JSON.stringify(currentTransform.scale)}`);
+                        console.log(`🎬   stage-main 偏移: position=${JSON.stringify(transform.transform.position)}, scale=${JSON.stringify(transform.transform.scale)}`);
+                        console.log(`🎬   最终 transform: position=${JSON.stringify(finalTransform.position)}, scale=${JSON.stringify(finalTransform.scale)}`);
+                        
+                        const expandedTransform: TransformData = {
+                            ...transform,
+                            target: target,
+                            transform: finalTransform
+                        };
+                        allSetTransforms.push(expandedTransform);
+                        allSetTransformsOriginalIndex.push(i); // 使用相同的原始索引
+                    }
                 }
             } else {
                 // 深拷贝 transform 对象，确保每个 setTransform 都有独立的 transform 对象
