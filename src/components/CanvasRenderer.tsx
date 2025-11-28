@@ -60,6 +60,8 @@ export default function CanvasRenderer(props: Props) {
     const spriteMap = useRef<Record<string, PixiContainer>>({});
     const graphicsMapRef = useRef<Record<string, PIXI.Graphics>>({});
     const overlayRef = useRef<{ container: PIXI.Container; filter: OverlayBlendFilter } | null>(null);
+    const stageContainerRef = useRef<PIXI.Container | null>(null); // 保存 stage-main 容器的引用
+    const sceneCenterRef = useRef<{ x: number; y: number } | null>(null); // 保存场景中心点
 
     const scaleX = canvasWidth / baseWidth;
     const scaleY = canvasHeight / baseHeight;
@@ -1597,6 +1599,10 @@ export default function CanvasRenderer(props: Props) {
             const sceneCenterX = (minX + maxX) / 2;
             const sceneCenterY = (minY + maxY) / 2;
             
+            // 保存场景中心点和 stageContainer 的引用，供动画更新使用
+            sceneCenterRef.current = { x: sceneCenterX, y: sceneCenterY };
+            stageContainerRef.current = stageContainer;
+            
             // 将容器内的对象的坐标转换为相对于场景中心的位置
             stageContainer.children.forEach((child: any) => {
                 const container = child as any;
@@ -1824,8 +1830,77 @@ export default function CanvasRenderer(props: Props) {
                 return;
             }
             
-            // 遍历所有动画状态，直接更新 Pixi 对象
+            // 检查是否存在 stage-main 容器，并收集在其中的对象的动画状态
+            const stageContainer = stageContainerRef.current;
+            const sceneCenter = sceneCenterRef.current;
+            const stageMainTargets = new Set<string>();
+            
+            if (stageContainer && sceneCenter) {
+                // 收集在 stageContainer 中的所有对象的 target
+                stageContainer.children.forEach((child: any) => {
+                    const container = child as any;
+                    // 从 container 中找到对应的 target（通过检查 spriteMap）
+                    for (const [target, c] of Object.entries(spriteMap.current)) {
+                        if (c === container) {
+                            stageMainTargets.add(target);
+                            break;
+                        }
+                    }
+                });
+                
+                // 如果有受 stage-main 影响的对象，需要合并它们的动画状态来更新 stageContainer
+                if (stageMainTargets.size > 0) {
+                    // 收集所有受 stage-main 影响的对象的动画状态
+                    // 由于 stage-main 的动画已经被展开为每个对象的动画，我们需要从其中一个对象提取 stage-main 的 transform
+                    // 实际上，stage-main 的动画状态应该存在于 animationState 中，target 应该是 "stage-main"
+                    const stageMainTransform = animationState.get('stage-main');
+                    
+                    if (stageMainTransform) {
+                        // 直接更新 stageContainer 的 transform
+                        const baseX = sceneCenter.x;
+                        const baseY = sceneCenter.y;
+                        
+                        // 更新 position
+                        if (stageMainTransform.position) {
+                            const px = (stageMainTransform.position.x ?? 0) * scaleX;
+                            const py = (stageMainTransform.position.y ?? 0) * scaleY;
+                            stageContainer.x = baseX + px;
+                            stageContainer.y = baseY + py;
+                        }
+                        
+                        // 更新 rotation
+                        if (stageMainTransform.rotation !== undefined) {
+                            stageContainer.rotation = stageMainTransform.rotation ?? 0;
+                        }
+                        
+                        // 更新 scale
+                        if (stageMainTransform.scale) {
+                            stageContainer.scale.set(
+                                stageMainTransform.scale.x ?? 1,
+                                stageMainTransform.scale.y ?? 1
+                            );
+                        }
+                    } else {
+                        // 如果没有 stage-main 的动画状态，尝试从展开后的对象动画中提取
+                        // 但是，由于对象的位置是相对于场景中心的，我们需要计算 stage-main 的 transform
+                        // 这很复杂，所以我们跳过 stageContainer 中的对象的单独更新
+                        // 这些对象应该只通过 stage-main 的动画来更新
+                    }
+                }
+            }
+            
+            // 遍历所有动画状态，直接更新 Pixi 对象（但跳过在 stageContainer 中的对象）
             animationState.forEach((transform, target) => {
+                // 如果 target 是 stage-main，已经在上面处理过了
+                if (target === 'stage-main') {
+                    return;
+                }
+                
+                // 如果对象在 stageContainer 中，跳过单独更新（它们会通过 stageContainer 更新）
+                if (stageMainTargets.has(target)) {
+                    return;
+                }
+                
                 const container = spriteMap.current[target];
                 if (!container) {
                     // 调试：如果容器不存在，打印警告

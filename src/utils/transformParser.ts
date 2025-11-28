@@ -324,68 +324,11 @@ export function buildAnimationSequence(transforms: TransformData[], transformInd
     for (let i = 0; i < transforms.length; i++) {
         const transform = transforms[i];
         if (transform.type === 'setTransform') {
-            // 如果 target 是 stage-main，只展开到在它之前的 target，并叠加 transform
+            // 如果 target 是 stage-main，直接添加为容器层动画，不展开
             if (transform.target === "stage-main") {
-                // 只展开到在该 stage-main 之前出现的 target
-                for (const [target, lastChangeIndex] of targetToLastChangeIndex.entries()) {
-                    // 如果该 target 的最后一个 changeFigure/changeBg 在这个 stage-main 之前
-                    if (lastChangeIndex < i) {
-                        const changeFigure = targetToChangeFigure.get(target);
-                        if (!changeFigure) continue;
-                        
-                        // 获取该 target 的当前 transform（从 changeFigure）
-                        let currentTransform: any = {
-                            ...changeFigure.transform,
-                            position: changeFigure.transform.position || { x: 0, y: 0 },
-                            scale: changeFigure.transform.scale || { x: 1, y: 1 },
-                            rotation: changeFigure.transform.rotation || 0
-                        };
-                        
-                        // 检查是否有该 target 的普通 setTransform（在 stage-main 之前）
-                        for (let j = i - 1; j >= 0; j--) {
-                            const prevTransform = transforms[j];
-                            if (prevTransform.type === 'setTransform' && prevTransform.target === target) {
-                                // 使用该 setTransform 的 transform
-                                if (prevTransform.transform.position !== undefined) {
-                                    currentTransform.position = { ...prevTransform.transform.position };
-                                }
-                                if (prevTransform.transform.scale !== undefined) {
-                                    currentTransform.scale = { ...prevTransform.transform.scale };
-                                }
-                                if (prevTransform.transform.rotation !== undefined) {
-                                    currentTransform.rotation = prevTransform.transform.rotation;
-                                }
-                                break;
-                            }
-                        }
-                        
-                        // 将 stage-main 的 transform 叠加到当前 transform
-                        const finalTransform: any = {
-                            position: {
-                                x: (currentTransform.position.x || 0) + (transform.transform.position?.x || 0),
-                                y: (currentTransform.position.y || 0) + (transform.transform.position?.y || 0)
-                            },
-                            scale: {
-                                x: (currentTransform.scale.x || 1) * (transform.transform.scale?.x || 1),
-                                y: (currentTransform.scale.y || 1) * (transform.transform.scale?.y || 1)
-                            },
-                            rotation: (currentTransform.rotation || 0) + (transform.transform.rotation || 0)
-                        };
-                        
-                        console.log(`🎬 stage-main 展开: target=${target}`);
-                        console.log(`🎬   当前 transform: position=${JSON.stringify(currentTransform.position)}, scale=${JSON.stringify(currentTransform.scale)}`);
-                        console.log(`🎬   stage-main 偏移: position=${JSON.stringify(transform.transform.position)}, scale=${JSON.stringify(transform.transform.scale)}`);
-                        console.log(`🎬   最终 transform: position=${JSON.stringify(finalTransform.position)}, scale=${JSON.stringify(finalTransform.scale)}`);
-                        
-                        const expandedTransform: TransformData = {
-                            ...transform,
-                            target: target,
-                            transform: finalTransform
-                        };
-                        allSetTransforms.push(expandedTransform);
-                        allSetTransformsOriginalIndex.push(i); // 使用相同的原始索引
-                    }
-                }
+                // 直接添加 stage-main 的 setTransform，不展开
+                allSetTransforms.push(JSON.parse(JSON.stringify(transform)));
+                allSetTransformsOriginalIndex.push(i); // 记录原始索引
             } else {
                 // 深拷贝 transform 对象，确保每个 setTransform 都有独立的 transform 对象
                 allSetTransforms.push(JSON.parse(JSON.stringify(transform)));
@@ -418,6 +361,18 @@ export function buildAnimationSequence(transforms: TransformData[], transformInd
             console.log(`🎬 初始化 target=${figureID} 的起始状态: position=${JSON.stringify(initialState.position)}, scale=${JSON.stringify(initialState.scale)}`);
         }
     });
+    
+    // 初始化 stage-main 的起始状态（如果存在）
+    // stage-main 的起始状态应该是 { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 }, rotation: 0 }
+    const hasStageMain = allSetTransforms.some(st => st.target === 'stage-main');
+    if (hasStageMain && !targetStates.has('stage-main')) {
+        targetStates.set('stage-main', {
+            position: { x: 0, y: 0 },
+            scale: { x: 1, y: 1 },
+            rotation: 0
+        });
+        console.log(`🎬 初始化 stage-main 的起始状态: position={x:0, y:0}, scale={x:1, y:1}, rotation=0`);
+    }
     
     // 首先，找出所有通过 next 连接的连续序列，并找出每个 target 在序列中的最后一个 setTransform
     // Map<target, 该 target 在每个连续序列中最后一个 setTransform 的索引数组>
