@@ -6,7 +6,6 @@ import { parseScript, applyFigureIDSystem } from './utils/transformParser';
 export default function ScriptOutputWindow() {
   const [outputScriptLines, setOutputScriptLines] = useState<string[]>([]);
   const [transforms, setTransforms] = useState<TransformData[]>([]); // 用于读取，获取当前选中的 target
-  const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]); // 用于读取，获取当前选中的索引
   const [scaleX, setScaleX] = useState(1);
   const [scaleY, setScaleY] = useState(1);
   const [, setSelectedGameFolder] = useState<string | null>(null); // 只用于设置，不读取
@@ -57,18 +56,8 @@ export default function ScriptOutputWindow() {
         }
       });
 
-      // 监听选中索引更新
-      const unlistenSelected = await listen<{
-        selectedIndexes: number[];
-      }>('script-output:selected-indexes-updated', (event) => {
-        if (event.payload && Array.isArray(event.payload.selectedIndexes)) {
-          setSelectedIndexes(event.payload.selectedIndexes);
-        }
-      });
-
       return () => {
         unlistenUpdate();
-        unlistenSelected();
       };
     };
 

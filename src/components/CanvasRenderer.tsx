@@ -55,6 +55,19 @@ export default function CanvasRenderer(props: Props) {
         mygo3Mode = false
         // fullOutputScriptLines 和 outputScriptLines 暂时未使用，但保留在 Props 接口中以便将来使用
     } = props;
+    
+    // 使用 ref 存储 lockX 和 lockY 的当前值，确保拖拽逻辑能访问最新的值
+    const lockXRef = useRef(lockX);
+    const lockYRef = useRef(lockY);
+    
+    // 当 lockX 或 lockY 变化时更新 ref
+    useEffect(() => {
+        lockXRef.current = lockX;
+    }, [lockX]);
+    
+    useEffect(() => {
+        lockYRef.current = lockY;
+    }, [lockY]);
 
     const appRef = useRef<PIXI.Application | null>(null);
     const spriteMap = useRef<Record<string, PixiContainer>>({});
@@ -92,71 +105,6 @@ export default function CanvasRenderer(props: Props) {
                 return i;
             }
         }
-        return -1;
-    }
-
-    // 辅助函数：找到影响某个 target 的 stage-main setTransform（即在该 target 的 changeFigure/changeBg 之前出现的最后一个 stage-main）
-    function findAffectingStageMain(transforms: TransformData[], target: string): number {
-        // 首先找到该 target 的最后一个 changeFigure/changeBg 的索引
-        let targetLastChangeIndex = -1;
-        for (let i = 0; i < transforms.length; i++) {
-            const t = transforms[i];
-            if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target === target) {
-                targetLastChangeIndex = i;
-            }
-        }
-        
-        // 如果没找到 changeFigure/changeBg，返回 -1
-        if (targetLastChangeIndex === -1) {
-            return -1;
-        }
-        
-        // 从后往前查找在该 changeFigure/changeBg 之前的最后一个 stage-main
-        for (let i = targetLastChangeIndex - 1; i >= 0; i--) {
-            const t = transforms[i];
-            if (t.type === 'setTransform' && t.target === 'stage-main') {
-                return i;
-            }
-        }
-        
-        return -1;
-    }
-
-    // 辅助函数：找到影响一组被操作对象的 stage-main（如果所有对象都受同一个 stage-main 影响，返回该 stage-main 的索引；否则返回 -1）
-    function findCommonAffectingStageMain(transforms: TransformData[], targetIndices: number[]): number {
-        if (targetIndices.length === 0) return -1;
-        
-        // 找到所有被操作对象对应的 target
-        const targets = new Set<string>();
-        for (const idx of targetIndices) {
-            const t = transforms[idx];
-            if (t && (t.type === 'changeFigure' || t.type === 'changeBg') && t.target) {
-                targets.add(t.target);
-            }
-        }
-        
-        if (targets.size === 0) return -1;
-        
-        // 找到影响每个 target 的 stage-main
-        const affectingStageMains = new Map<string, number>();
-        for (const target of targets) {
-            const stageMainIdx = findAffectingStageMain(transforms, target);
-            if (stageMainIdx !== -1) {
-                affectingStageMains.set(target, stageMainIdx);
-            }
-        }
-        
-        // 如果所有 target 都受同一个 stage-main 影响，返回该 stage-main 的索引
-        const stageMainIndices = Array.from(affectingStageMains.values());
-        if (stageMainIndices.length === 0) return -1;
-        
-        // 检查是否所有索引都相同
-        const firstIdx = stageMainIndices[0];
-        if (stageMainIndices.every(idx => idx === firstIdx)) {
-            return firstIdx;
-        }
-        
-        // 如果受不同的 stage-main 影响，返回 -1（不统一更新 stage-main）
         return -1;
     }
 
@@ -1457,10 +1405,10 @@ export default function CanvasRenderer(props: Props) {
                                     if (!stageMainSetTransform.transform.position) {
                                         stageMainSetTransform.transform.position = { x: 0, y: 0 };
                                     }
-                                    if (!lockX) {
+                                    if (!lockXRef.current) {
                                         stageMainSetTransform.transform.position.x = initialPos.x + deltaX / scaleX;
                                     }
-                                    if (!lockY) {
+                                    if (!lockYRef.current) {
                                         stageMainSetTransform.transform.position.y = initialPos.y + deltaY / scaleY;
                                     }
                                     
@@ -1484,10 +1432,10 @@ export default function CanvasRenderer(props: Props) {
                                                     if (!copy[setTransformIdx].transform.position) {
                                                         copy[setTransformIdx].transform.position = { x: 0, y: 0 };
                                                     }
-                                                    if (!lockX) {
+                                                    if (!lockXRef.current) {
                                                         copy[setTransformIdx].transform.position.x = initialPos.x + deltaX / scaleX;
                                                     }
-                                                    if (!lockY) {
+                                                    if (!lockYRef.current) {
                                                         copy[setTransformIdx].transform.position.y = initialPos.y + deltaY / scaleY;
                                                     }
                                                 });
@@ -1496,10 +1444,10 @@ export default function CanvasRenderer(props: Props) {
                                                 if (!copy[idx].transform.position) {
                                                     copy[idx].transform.position = { x: 0, y: 0 };
                                                 }
-                                                if (!lockX) {
+                                                if (!lockXRef.current) {
                                                     copy[idx].transform.position.x = initialPos.x + deltaX / scaleX;
                                                 }
-                                                if (!lockY) {
+                                                if (!lockYRef.current) {
                                                     copy[idx].transform.position.y = initialPos.y + deltaY / scaleY;
                                                 }
                                             }
