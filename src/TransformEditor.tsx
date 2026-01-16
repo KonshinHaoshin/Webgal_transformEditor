@@ -190,26 +190,35 @@ export default function TransformEditor() {
 
     // 检测文件类型（检查扩展名）
     const ext = filePath.split('.').pop()?.toLowerCase();
-    const isLive2D = ext === 'json' || ext === 'jsonl';
+    const isJsonOrJsonl = ext === 'json' || ext === 'jsonl';
+    const isMano = filePath.toLowerCase().includes('.char.json') || filePath.includes('type=webgal_mano');
 
     if (type === 'figure') {
       // 生成新的 figure id
       const figureId = nextFigureName(transforms);
 
-      if (isLive2D) {
-        // Live2D 模型（json/jsonl）：等待加载完成后再添加 transform
-        console.log(`✅ 准备加载 Live2D 模型: ${filename}`);
+      if (isJsonOrJsonl) {
+        // 如果是 Mano 文件，自动添加参数
+        let finalPath = filePath;
+        // 如果是 .char.json 或者是满足 Mano 结构的 JSON
+        // 自动添加 type=webgal_mano
+        if (isMano && !finalPath.includes('type=webgal_mano')) {
+          finalPath = `${finalPath}?type=webgal_mano`;
+        }
+
+        // Live2D 或 Mano 模型：等待加载完成后再添加 transform
+        console.log(`✅ 准备加载模型: ${filename} (Mano: ${isMano})`);
         
         try {
           // 先加载模型
-          await figureManager.addFigure(figureId, fileUrl, filePath);
-          console.log(`✅ Live2D 模型加载成功: ${filename}`);
+          await figureManager.addFigure(figureId, fileUrl, finalPath);
+          console.log(`✅ 模型加载成功: ${filename}`);
           
           // 加载完成后再添加到 transforms
           setTransforms(prev => {
             const newChangeFigure: TransformData = {
               type: "changeFigure",
-              path: filePath,
+              path: finalPath,
               target: figureId,
               duration: 0,
               transform: {
@@ -224,8 +233,8 @@ export default function TransformEditor() {
             return newTransforms;
           });
         } catch (error) {
-          console.error(`❌ Live2D 模型加载失败: ${filename}`, error);
-          alert(`Live2D 模型加载失败: ${error}`);
+          console.error(`❌ 模型加载失败: ${filename}`, error);
+          alert(`模型加载失败: ${error}`);
         }
       } else {
         // 普通图片：也通过 figureManager 加载，不设置全局 modelImg

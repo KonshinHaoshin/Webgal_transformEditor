@@ -212,24 +212,26 @@ export default function CanvasRenderer(props: Props) {
     // 使用 ref 来跟踪上一次应用的 motion/expression，避免重复应用
     const lastAppliedMotionExpressionRef = useRef<Map<string, { motion?: string; expression?: string }>>(new Map());
 
-    // 监听 motion 和 expression 的变化，应用到 Live2D 模型
+    // 监听 motion 和 expression 的变化，应用到 Live2D 模型或 Mano 模型
     useEffect(() => {
         // 只对最后一个 changeFigure 应用 motion 和 expression
         for (const [target, transform] of lastChangeFigureForMotionExpression) {
             const motion = transform.motion;
             const {expression} = transform;
+            const pose = transform.extraParams?.pose;
 
             // 检查是否和上一次应用的值相同，如果相同则跳过
-            const lastApplied = lastAppliedMotionExpressionRef.current.get(target);
+            const lastApplied = lastAppliedMotionExpressionRef.current.get(target) as any;
             if (lastApplied &&
                 lastApplied.motion === motion &&
-                lastApplied.expression === expression) {
+                lastApplied.expression === expression &&
+                lastApplied.pose === pose) {
                 // 值没有变化，跳过
                 continue;
             }
 
             // 更新记录
-            lastAppliedMotionExpressionRef.current.set(target, { motion, expression });
+            lastAppliedMotionExpressionRef.current.set(target, { motion, expression, pose } as any);
 
             // 应用 motion（只对最后一个 changeFigure）
             if (motion !== undefined && motion !== '') {
@@ -239,6 +241,12 @@ export default function CanvasRenderer(props: Props) {
             // 应用 expression（只对最后一个 changeFigure）
             if (expression !== undefined && expression !== '') {
                 figureManager.applyExpression(target, expression);
+            }
+
+            // 应用 pose（针对 webgal_mano）
+            if (pose !== undefined && pose !== '') {
+                // pose 在 Mano 中也是通过 setPose 应用
+                figureManager.applyMotion(target, pose);
             }
         }
 
@@ -867,8 +875,8 @@ export default function CanvasRenderer(props: Props) {
             let sprite: any;
             const figure = figureManager.getFigure(t.target);
             
-            if (figure?.sourceType === 'live2d' || figure?.sourceType === 'jsonl') {
-                // Live2D 模型：使用 Container 包装以确保事件能正确传递
+            if (figure?.sourceType === 'live2d' || figure?.sourceType === 'jsonl' || figure?.sourceType === 'webgal_mano') {
+                // Live2D 或 Mano 模型：使用 Container 包装以确保事件能正确传递
                 const wrapper = new PIXI.Container();
                 wrapper.addChild(displayObject);
                 
@@ -988,7 +996,7 @@ export default function CanvasRenderer(props: Props) {
             sprite.height = drawH;
             
             // 对于普通图片和 GIF，设置 anchor 和 hitArea（使用实际的渲染尺寸）
-            if (figure?.sourceType !== 'live2d' && figure?.sourceType !== 'jsonl') {
+            if (figure?.sourceType !== 'live2d' && figure?.sourceType !== 'jsonl' && figure?.sourceType !== 'webgal_mano') {
                 sprite.anchor?.set(0.5);
                 
                 // 在设置完尺寸后，设置 hitArea（使用实际的渲染尺寸 drawW 和 drawH）

@@ -3,7 +3,7 @@
  * 根据文件扩展名判断文件类型
  */
 
-export type FileCategory = 'image' | 'gif' | 'live2d_json' | 'live2d_jsonl' | 'video_webm' | 'unknown';
+export type FileCategory = 'image' | 'gif' | 'live2d_json' | 'live2d_jsonl' | 'video_webm' | 'webgal_mano' | 'unknown';
 
 export interface FileTypeInfo {
   category: FileCategory;
@@ -182,7 +182,7 @@ export function getMimeType(filePath: string): string {
  * @param category 文件类别
  * @returns figureManager 支持的类型
  */
-export function convertToFigureSourceType(category: FileCategory): 'img' | 'gif' | 'video' | 'webm' | 'live2d' | 'jsonl' {
+export function convertToFigureSourceType(category: FileCategory): 'img' | 'gif' | 'video' | 'webm' | 'live2d' | 'jsonl' | 'webgal_mano' {
   switch (category) {
     case 'gif':
       return 'gif';
@@ -192,6 +192,8 @@ export function convertToFigureSourceType(category: FileCategory): 'img' | 'gif'
       return 'live2d';
     case 'live2d_jsonl':
       return 'jsonl';
+    case 'webgal_mano':
+      return 'webgal_mano';
     case 'image':
     default:
       return 'img';

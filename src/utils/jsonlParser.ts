@@ -28,11 +28,34 @@ export async function extractMotionsAndExpressions(
     
     const isJsonl = filePath.toLowerCase().endsWith('.jsonl');
     const isJson = filePath.toLowerCase().endsWith('.json');
-    const fileType = isJsonl ? 'JSONL' : isJson ? 'JSON' : '未知';
+    const isMano = filePath.includes('type=webgal_mano');
+    const fileType = isMano ? 'Mano' : isJsonl ? 'JSONL' : isJson ? 'JSON' : '未知';
     
     console.log(`🔍 正在通过后端加载 ${fileType}: ${filePath}`);
     console.log(`   游戏文件夹: ${finalGameFolder || '未设置'}`);
     
+    // 如果是 Mano 格式，且已经在前端有 Blob URL，可以尝试直接解析
+    if (isMano) {
+      try {
+        const { webgalFileManager } = await import('./webgalFileManager');
+        const blobUrl = await webgalFileManager.getFigurePath(filePath);
+        if (blobUrl) {
+          const resp = await fetch(blobUrl);
+          if (resp.ok) {
+            const modelData = await resp.json();
+            const poses = Object.keys(modelData?.controller?.poses || {});
+            console.log(`✅ [Mano] 成功从前端提取: ${poses.length} 个 poses`);
+            return {
+              motions: poses, // 将 Mano 的 poses 映射到 motions
+              expressions: poses // 同时映射到 expressions，让两个下拉框都能选
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('[Mano] 前端直接解析失败，回退到后端:', e);
+      }
+    }
+
     // 调用后端命令
     const result = await invoke<{ motions: string[]; expressions: string[] }>(
       'extract_jsonl_motions_expressions',

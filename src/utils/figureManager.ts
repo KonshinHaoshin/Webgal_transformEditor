@@ -1,9 +1,10 @@
 import { AnimatedGIF } from '@pixi/gif';
 import * as PIXI from 'pixi.js';
 import { detectFileType, convertToFigureSourceType } from './fileTypeDetector';
+import { CharacterPlayer } from 'webgal_mano';
 
 // 立绘文件类型
-export type FigureSourceType = 'img' | 'gif' | 'video' | 'webm' | 'live2d' | 'jsonl';
+export type FigureSourceType = 'img' | 'gif' | 'video' | 'webm' | 'live2d' | 'jsonl' | 'webgal_mano';
 
 // PIXI 显示对象（可以是图片、GIF、Live2D 等）
 export type FigureDisplayObject = PIXI.Sprite | AnimatedGIF | any; // any for Live2D models
@@ -58,6 +59,10 @@ export class FigureManager {
 
   // 判断文件类型（使用新的类型检测器）
   private determineSourceType(filePath: string): FigureSourceType {
+    // 检查是否显式指定了 type=webgal_mano
+    if (filePath.includes('type=webgal_mano')) {
+      return 'webgal_mano';
+    }
     const fileType = detectFileType(filePath);
     return convertToFigureSourceType(fileType.category);
   }
@@ -329,6 +334,86 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
   };
 }
 
+  // 加载 WebGAL Mano 分层立绘
+  private async loadMano(jsonPath: string): Promise<{ model: CharacterPlayer; width: number; height: number }> {
+    try {
+      /** ---------------------------
+       * 1. 加载 model.char.json
+       * --------------------------- */
+      const resp = await fetch(jsonPath);
+      if (!resp.ok) {
+        throw new Error(`Failed to fetch mano json: ${resp.status}`);
+      }
+      const modelData = await resp.json();
+
+      /** ---------------------------
+       * 2. 计算 basePath（绝对 URL）
+       * --------------------------- */
+      const cleanJsonUrl = jsonPath.split('?')[0];
+      const baseDir = cleanJsonUrl.slice(0, cleanJsonUrl.lastIndexOf('/') + 1);
+      const basePathFromModel = modelData.settings?.basePath;
+      const basePathAbs = new URL(
+        basePathFromModel && basePathFromModel !== './' ? basePathFromModel : baseDir,
+        window.location.href,
+      ).href;
+
+      modelData.settings = modelData.settings ?? {};
+      modelData.settings.basePath = basePathAbs;
+
+      /** ---------------------------
+       * 3. 预加载所有 layer 纹理
+       * --------------------------- */
+      const layers: any[] = modelData.assets?.layers ?? [];
+      if (!layers.length) throw new Error('mano layers empty');
+
+      const waitForTextureReady = (texture: PIXI.Texture) =>
+        new Promise<void>((resolve) => {
+          if (texture.baseTexture.valid) {
+            resolve();
+            return;
+          }
+          texture.baseTexture.once('loaded', () => resolve());
+          texture.baseTexture.once('error', () => resolve());
+        });
+      
+      const textures: Record<string, PIXI.Texture> = {};
+      const loadLayerTexture = async (id: string, url: string) => {
+        if (textures[id]) return;
+        // @ts-ignore
+        const texture = await PIXI.Texture.fromURL(url);
+        await waitForTextureReady(texture);
+        textures[id] = texture;
+        textures[url] = texture;
+      };
+
+      await Promise.all(
+        layers.map((layer: any) => {
+          const id = String(layer.id);
+          const url = new URL(String(layer.path), basePathAbs).href;
+          return loadLayerTexture(id, url);
+        }),
+      );
+
+      /** ---------------------------
+       * 4. 创建 CharacterPlayer
+       * --------------------------- */
+      const player = new CharacterPlayer(modelData, textures);
+      player.resetToDefault();
+
+      // 设置中心点为中心
+      player.pivot.set(player.width / 2, player.height / 2);
+
+      return {
+        model: player,
+        width: player.width,
+        height: player.height
+      };
+    } catch (err) {
+      console.error('[WebGAL Mano] load error:', err);
+      throw err;
+    }
+  }
+
   // 添加或更新立绘
   async addFigure(key: string, url: string, originalPath?: string): Promise<IFigureObject | null> {
     // 如果已存在，先删除旧的
@@ -390,6 +475,19 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
           case 'jsonl': {
             const { model, width, height } = await this.loadJsonl(url);
             // JSONL 返回一个包含所有模型的容器
+            figure = {
+              key,
+              sourceUrl: url,
+              sourceType,
+              displayObject: model,
+              width,
+              height
+            };
+            break;
+          }
+
+          case 'webgal_mano': {
+            const { model, width, height } = await this.loadMano(url);
             figure = {
               key,
               sourceUrl: url,
@@ -474,7 +572,7 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
     return this.live2DManager?.isAvailable || false;
   }
 
-  // 应用 motion 到 Live2D 模型
+  // 应用 motion 到 Live2D 模型或 Mano 模型
   applyMotion(key: string, motion: string | undefined): void {
     const figure = this.figures.get(key);
     if (!figure) return;
@@ -508,10 +606,26 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
           }
         }
       }
+    } else if (figure.sourceType === 'webgal_mano') {
+      const player = figure.displayObject as CharacterPlayer;
+      if (player && motion) {
+        try {
+          // 支持 {Pose1,Pose2} 格式
+          if (motion.startsWith('{') && motion.endsWith('}')) {
+            const poses = motion.slice(1, -1).split(',');
+            poses.forEach(p => player.setPose(p.trim()));
+          } else {
+            player.setPose(motion);
+          }
+          console.log(`✅ [webgal_mano] 已应用 pose "${motion}" 到 ${key}`);
+        } catch (e) {
+          console.warn(`[webgal_mano] 应用 pose 失败 (${key}):`, e);
+        }
+      }
     }
   }
 
-  // 应用 expression 到 Live2D 模型
+  // 应用 expression 到 Live2D 模型或 Mano 模型
   applyExpression(key: string, expression: string | undefined): void {
     const figure = this.figures.get(key);
     if (!figure) return;
@@ -559,6 +673,22 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
               console.warn(`清除 expression 失败 (${key}):`, e);
             }
           }
+        }
+      }
+    } else if (figure.sourceType === 'webgal_mano') {
+      const player = figure.displayObject as CharacterPlayer;
+      if (player && expression) {
+        try {
+          // 对于 Mano，expression 也是一种 pose
+          if (expression.startsWith('{') && expression.endsWith('}')) {
+            const poses = expression.slice(1, -1).split(',');
+            poses.forEach(p => player.setPose(p.trim()));
+          } else {
+            player.setPose(expression);
+          }
+          console.log(`✅ [webgal_mano] 已应用 expression/pose "${expression}" 到 ${key}`);
+        } catch (e) {
+          console.warn(`[webgal_mano] 应用 expression 失败 (${key}):`, e);
         }
       }
     }
