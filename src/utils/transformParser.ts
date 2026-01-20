@@ -181,9 +181,17 @@ export function exportScript(
             const roundedTransform = roundTransform(transform);
             const transformJson = JSON.stringify(roundedTransform);
 
+            const isMano = obj.path.includes('type=webgal_mano');
             // extras：无值参数输出成 "-k"，有值参数输出 "-k=v"
             const extras = Object.entries(obj.extraParams || {})
-                .map(([k, v]) => (v === "" || v === undefined) ? ` -${k}` : ` -${k}=${v}`)
+                .filter(([k]) => k !== "poseExtra") // 显式过滤掉 poseExtra
+                .map(([k, v]) => {
+                    // 特殊处理 Mano 的 pose 参数，自动包裹 {}
+                    if (isMano && k === 'pose' && typeof v === 'string' && v && !v.startsWith('{')) {
+                        return ` -pose={${v}}`;
+                    }
+                    return (v === "" || v === undefined) ? ` -${k}` : ` -${k}=${v}`;
+                })
                 .join("");
 
             const presetFlag = obj.presetPosition && obj.presetPosition !== 'center' ? ` -${obj.presetPosition}` : '';
@@ -215,6 +223,7 @@ export function exportScript(
             
             // extras：无值参数输出成 "-k"，有值参数输出 "-k=v"
             const extras = Object.entries(obj.extraParams || {})
+                .filter(([k]) => k !== "poseExtra") // 显式过滤掉 poseExtra
                 .map(([k, v]) => (v === "" || v === undefined) ? ` -${k}` : ` -${k}=${v}`)
                 .join("");
             result.push(`changeBg:${obj.path} -transform=${transformJson}${extras};`);
@@ -917,6 +926,12 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
                     } catch {
                         console.warn("❌ 解析 transform JSON 失败:", v);
                     }
+                } else if (k === "poseExtra") {
+                    // 如果有 poseExtra，且没有 pose，则将其视为 pose
+                    if (!params.pose) {
+                        params.pose = v || "";
+                    }
+                    continue;
                 } else if (k && v) {
                     params[k] = v;
                 } else if (k && !v) {
@@ -928,6 +943,19 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
 
             const target = params.id || "unknown";
             
+            // 特殊处理 WebGAL Mano:
+            if (path.includes('type=webgal_mano')) {
+                if (params.pose) {
+                    let p = params.pose.trim();
+                    if (p.startsWith('{') && p.endsWith('}')) {
+                        params.pose = p.slice(1, -1);
+                    }
+                } else {
+                    // 默认值也去掉花括号，显示为 Default,Angle01/Facial/Cheeks-
+                    params.pose = "Default,Angle01/Facial/Cheeks-";
+                }
+            }
+
             // 更新 target 的状态为 changeFigure 的 transform
             targetStates.set(target, transform);
 

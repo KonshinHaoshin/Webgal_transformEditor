@@ -293,7 +293,7 @@ export default function TransformEditor() {
       }
     } else {
       // 背景文件（通常不会是 json/jsonl，但为了安全也检查一下）
-      if (isLive2D) {
+      if (isJsonOrJsonl) {
         console.warn(`⚠️ 背景文件不支持 Live2D 格式: ${filename}`);
         return;
       }
@@ -2105,13 +2105,15 @@ export default function TransformEditor() {
             onChangeScale={(index, axis, newScale) => {
               setTransforms((prev) => {
                 const copy = [...prev];
-                if (!copy[index].transform.scale) {
-                  copy[index].transform.scale = { x: 1, y: 1 };
+                const transform = copy[index];
+                if (!transform) return copy;
+                if (!transform.transform.scale) {
+                  transform.transform.scale = { x: 1, y: 1 };
                 }
                 if (axis === 'x') {
-                  copy[index].transform.scale.x = newScale;
+                  transform.transform.scale.x = newScale;
                 } else {
-                  copy[index].transform.scale.y = newScale;
+                  transform.transform.scale.y = newScale;
                 }
                 return copy;
               });
@@ -2119,7 +2121,23 @@ export default function TransformEditor() {
             onChangeMotion={(index, newMotion) => {
               setTransforms((prev) => {
                 const copy = [...prev];
-                copy[index] = { ...copy[index], motion: newMotion || undefined };
+                const transform = copy[index];
+                if (!transform) return copy;
+                // 检查是否是 Mano 文件
+                const isMano = transform.path?.includes('type=webgal_mano');
+                if (isMano) {
+                  // Mano 文件：将 pose 保存到 extraParams.pose
+                  const extraParams = { ...transform.extraParams };
+                  if (newMotion) {
+                    extraParams.pose = newMotion;
+                  } else {
+                    delete extraParams.pose;
+                  }
+                  copy[index] = { ...transform, extraParams };
+                } else {
+                  // Live2D 文件：保存到 motion
+                  copy[index] = { ...transform, motion: newMotion || undefined };
+                }
                 return copy;
               });
             }}

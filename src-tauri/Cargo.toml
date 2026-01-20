@@ -1,6 +1,6 @@
 [package]
 name = "transformeditor"
-version = "1.2.4"
+version = "1.3.0"
 description = "WebGAL Transform Editor - A visual script editor for WebGAL game engine with transform editing capabilities for figures and backgrounds"
 authors = ["DongshanRandeng"]
 edition = "2021"

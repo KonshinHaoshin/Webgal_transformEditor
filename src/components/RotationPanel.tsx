@@ -224,7 +224,7 @@ export default function RotationPanel({
             {/* Live2D Motion 和 Expression 选择器（仅对 changeFigure 类型显示） */}
             {selectedIndexes.some(idx => transforms[idx]?.type === 'changeFigure') && (
                 <>
-                    <h3 style={{ marginTop: 30 }}>Live2D 动作和表情</h3>
+                    <h3 style={{ marginTop: 30 }}>立绘动作和表情</h3>
                     
                     {selectedIndexes.map((index) => {
                         const t = transforms[index];
@@ -234,8 +234,9 @@ export default function RotationPanel({
                         const isJson = t.path?.toLowerCase().endsWith('.json');
                         const isMano = t.path?.includes('type=webgal_mano');
                         const motions = (isJsonl || isJson || isMano) ? getMotions(t.path) : [];
-                        const expressions = (isJsonl || isJson || isMano) ? getExpressions(t.path) : [];
-                        const currentMotion = t.motion || '';
+                        const expressions = (isJsonl || isJson) && !isMano ? getExpressions(t.path) : [];
+                        // 对于 Mano，使用 extraParams.pose；对于 Live2D，使用 motion
+                        const currentMotion = isMano ? (t.extraParams?.pose || '') : (t.motion || '');
                         const currentExpression = t.expression || '';
 
                         return (
@@ -249,29 +250,41 @@ export default function RotationPanel({
                                         </span>
                                     </label>
 
-                                    {/* Motion 选择器 */}
+                                    {/* Motion 选择器（Live2D）或 Pose 输入框（Mano） */}
                                     {(isJsonl || isJson || isMano) && onChangeMotion && (
-                                        <label>
-                                            {isMano ? 'Pose:' : 'Motion:'}
-                                            <select
-                                                value={currentMotion}
-                                                onChange={(e) => onChangeMotion(index, e.target.value)}
-                                                style={{ marginLeft: 6, minWidth: 150 }}
-                                            >
-                                                <option value="">无动作</option>
-                                                {motions.map((motion) => (
-                                                    <option key={motion} value={motion}>
-                                                        {motion}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </label>
+                                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                            <label>
+                                                {isMano ? 'Pose:' : 'Motion:'}
+                                                {isMano ? (
+                                                    <input
+                                                        type="text"
+                                                        value={currentMotion}
+                                                        onChange={(e) => onChangeMotion(index, e.target.value)}
+                                                        placeholder="例如: Angry1,ArmR1,Cheeks-Flushed"
+                                                        style={{ marginLeft: 6, width: 250 }}
+                                                    />
+                                                ) : (
+                                                    <select
+                                                        value={currentMotion}
+                                                        onChange={(e) => onChangeMotion(index, e.target.value)}
+                                                        style={{ marginLeft: 6, minWidth: 150 }}
+                                                    >
+                                                        <option value="">无动作</option>
+                                                        {motions.map((motion) => (
+                                                            <option key={motion} value={motion}>
+                                                                {motion}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                )}
+                                            </label>
+                                        </div>
                                     )}
 
-                                    {/* Expression 选择器 */}
-                                    {(isJsonl || isJson || isMano) && onChangeExpression && (
+                                    {/* Expression 选择器（仅 Live2D，Mano 不使用） */}
+                                    {(isJsonl || isJson) && !isMano && onChangeExpression && (
                                         <label>
-                                            {isMano ? 'Pose (Extra):' : 'Expression:'}
+                                            Expression:
                                             <select
                                                 value={currentExpression}
                                                 onChange={(e) => onChangeExpression(index, e.target.value)}

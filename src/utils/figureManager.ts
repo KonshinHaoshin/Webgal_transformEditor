@@ -400,7 +400,7 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
       const player = new CharacterPlayer(modelData, textures);
       player.resetToDefault();
 
-      // 设置中心点为中心
+      // 设置中心点为中心 (与其他立绘一致)
       player.pivot.set(player.width / 2, player.height / 2);
 
       return {
@@ -610,16 +610,33 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
       const player = figure.displayObject as CharacterPlayer;
       if (player && motion) {
         try {
-          // 支持 {Pose1,Pose2} 格式
-          if (motion.startsWith('{') && motion.endsWith('}')) {
-            const poses = motion.slice(1, -1).split(',');
-            poses.forEach(p => player.setPose(p.trim()));
-          } else {
-            player.setPose(motion);
+          // 处理 WebGAL Mano 的多姿势与图层覆盖语法
+          // 例如: {Default,Angle01/Facial/Cheeks-} 或 Default,Angle01/Facial/Cheeks-
+          let cleanMotion = motion.trim();
+          if (cleanMotion.startsWith('{') && cleanMotion.endsWith('}')) {
+            cleanMotion = cleanMotion.slice(1, -1);
           }
-          console.log(`✅ [webgal_mano] 已应用 pose "${motion}" 到 ${key}`);
+
+          // 统一按逗号分割处理
+          const items = cleanMotion.split(',').map(i => i.trim()).filter(Boolean);
+          items.forEach(item => {
+            if (item.endsWith('-')) {
+              // 图层隐藏: id-
+              const layerId = item.slice(0, -1);
+              player.setLayerVisible(layerId, false);
+            } else if (item.endsWith('+')) {
+              // 图层显示: id+
+              const layerId = item.slice(0, -1);
+              player.setLayerVisible(layerId, true);
+            } else {
+              // 普通姿势切换
+              player.setPose(item);
+            }
+          });
+          
+          console.log(`✅ [webgal_mano] 已应用指令 "${motion}" 到 ${key}`);
         } catch (e) {
-          console.warn(`[webgal_mano] 应用 pose 失败 (${key}):`, e);
+          console.warn(`[webgal_mano] 应用指令失败 (${key}):`, e);
         }
       }
     }
@@ -679,16 +696,25 @@ private async loadJsonl(jsonlPath: string): Promise<{ model: any; width: number;
       const player = figure.displayObject as CharacterPlayer;
       if (player && expression) {
         try {
-          // 对于 Mano，expression 也是一种 pose
-          if (expression.startsWith('{') && expression.endsWith('}')) {
-            const poses = expression.slice(1, -1).split(',');
-            poses.forEach(p => player.setPose(p.trim()));
-          } else {
-            player.setPose(expression);
+          // Mano 的 expression 同样支持图层覆盖语法
+          let cleanExpr = expression.trim();
+          if (cleanExpr.startsWith('{') && cleanExpr.endsWith('}')) {
+            cleanExpr = cleanExpr.slice(1, -1);
           }
-          console.log(`✅ [webgal_mano] 已应用 expression/pose "${expression}" 到 ${key}`);
+
+          const items = cleanExpr.split(',').map(i => i.trim()).filter(Boolean);
+          items.forEach(item => {
+            if (item.endsWith('-')) {
+              player.setLayerVisible(item.slice(0, -1), false);
+            } else if (item.endsWith('+')) {
+              player.setLayerVisible(item.slice(0, -1), true);
+            } else {
+              player.setPose(item);
+            }
+          });
+          console.log(`✅ [webgal_mano] 已应用指令 "${expression}" 到 ${key}`);
         } catch (e) {
-          console.warn(`[webgal_mano] 应用 expression 失败 (${key}):`, e);
+          console.warn(`[webgal_mano] 应用指令失败 (${key}):`, e);
         }
       }
     }
