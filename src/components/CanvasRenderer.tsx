@@ -33,7 +33,8 @@ interface Props {
     breakpoints?: Set<number>; // 断点行索引集合
     fullOutputScriptLines?: string[]; // 完整的输出脚本行（不受断点影响）
     outputScriptLines?: string[]; // 当前的输出脚本行
-    mygo3Mode?: boolean; // MyGO!!!!! 3.0 模式
+    // mygo3Mode?: boolean; // MyGO!!!!! 3.0 模式 (已弃用)
+    positioningType?: 'M_2_3' | 'M_2_4' | 'M_3_0_0' | 'M_3_1_0'; // 立绘定位系统
 }
 
 export default function CanvasRenderer(props: Props) {
@@ -52,14 +53,31 @@ export default function CanvasRenderer(props: Props) {
         showTargetId = true,
         animationStateRef,
         breakpoints = new Set(),
-        mygo3Mode = false
+        // mygo3Mode = false,
+        positioningType = 'M_2_4'
         // fullOutputScriptLines 和 outputScriptLines 暂时未使用，但保留在 Props 接口中以便将来使用
     } = props;
+    
+    // 使用 ref 存储 lockX 和 lockY 的当前值，确保拖拽逻辑能访问最新的值
+    const lockXRef = useRef(lockX);
+    const lockYRef = useRef(lockY);
+    
+    // 当 lockX 或 lockY 变化时更新 ref
+    useEffect(() => {
+        lockXRef.current = lockX;
+    }, [lockX]);
+    
+    useEffect(() => {
+        lockYRef.current = lockY;
+    }, [lockY]);
 
     const appRef = useRef<PIXI.Application | null>(null);
     const spriteMap = useRef<Record<string, PixiContainer>>({});
     const graphicsMapRef = useRef<Record<string, PIXI.Graphics>>({});
+    const nameTextMapRef = useRef<Record<string, PIXI.Text>>({}); // 新增：用于跟踪角色名文本
     const overlayRef = useRef<{ container: PIXI.Container; filter: OverlayBlendFilter } | null>(null);
+    const stageContainerRef = useRef<PIXI.Container | null>(null); // 保存 stage-main 容器的引用
+    const sceneCenterRef = useRef<{ x: number; y: number } | null>(null); // 保存场景中心点
 
     const scaleX = canvasWidth / baseWidth;
     const scaleY = canvasHeight / baseHeight;
@@ -197,24 +215,26 @@ export default function CanvasRenderer(props: Props) {
     // 使用 ref 来跟踪上一次应用的 motion/expression，避免重复应用
     const lastAppliedMotionExpressionRef = useRef<Map<string, { motion?: string; expression?: string }>>(new Map());
 
-    // 监听 motion 和 expression 的变化，应用到 Live2D 模型
+    // 监听 motion 和 expression 的变化，应用到 Live2D 模型或 Mano 模型
     useEffect(() => {
         // 只对最后一个 changeFigure 应用 motion 和 expression
         for (const [target, transform] of lastChangeFigureForMotionExpression) {
             const motion = transform.motion;
             const {expression} = transform;
+            const pose = transform.extraParams?.pose;
 
             // 检查是否和上一次应用的值相同，如果相同则跳过
-            const lastApplied = lastAppliedMotionExpressionRef.current.get(target);
+            const lastApplied = lastAppliedMotionExpressionRef.current.get(target) as any;
             if (lastApplied &&
                 lastApplied.motion === motion &&
-                lastApplied.expression === expression) {
+                lastApplied.expression === expression &&
+                lastApplied.pose === pose) {
                 // 值没有变化，跳过
                 continue;
             }
 
             // 更新记录
-            lastAppliedMotionExpressionRef.current.set(target, { motion, expression });
+            lastAppliedMotionExpressionRef.current.set(target, { motion, expression, pose } as any);
 
             // 应用 motion（只对最后一个 changeFigure）
             if (motion !== undefined && motion !== '') {
@@ -224,6 +244,12 @@ export default function CanvasRenderer(props: Props) {
             // 应用 expression（只对最后一个 changeFigure）
             if (expression !== undefined && expression !== '') {
                 figureManager.applyExpression(target, expression);
+            }
+
+            // 应用 pose（针对 webgal_mano）
+            if (pose !== undefined && pose !== '') {
+                // pose 在 Mano 中也是通过 setPose 应用
+                figureManager.applyMotion(target, pose);
             }
         }
 
@@ -307,11 +333,35 @@ export default function CanvasRenderer(props: Props) {
                     }
 
                     // 获取对象的位置和尺寸
+                    // 收集所有 figure 和背景的 ID（用于展开 stage-main）
+                    const allFigureIdsForWheel = new Set<string>();
+                    for (const t of transforms) {
+                        if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target) {
+                            allFigureIdsForWheel.add(t.target);
+                        }
+                    }
+                    
                     const setTransformMap = new Map<string, TransformData>();
                     for (let i = transforms.length - 1; i >= 0; i--) {
                         const t = transforms[i];
-                        if (t.type === "setTransform" && t.target && !setTransformMap.has(t.target)) {
-                            setTransformMap.set(t.target, t);
+                        if (t.type === "setTransform" && t.target) {
+                            // 如果 target 是 stage-main，展开为所有立绘和背景
+                            if (t.target === "stage-main") {
+                                for (const figureId of allFigureIdsForWheel) {
+                                    if (!setTransformMap.has(figureId)) {
+                                        const expandedTransform: TransformData = {
+                                            ...t,
+                                            target: figureId,
+                                            transform: JSON.parse(JSON.stringify(t.transform))
+                                        };
+                                        setTransformMap.set(figureId, expandedTransform);
+                                    }
+                                }
+                            } else {
+                                if (!setTransformMap.has(t.target)) {
+                                    setTransformMap.set(t.target, t);
+                                }
+                            }
                         }
                     }
 
@@ -356,37 +406,55 @@ export default function CanvasRenderer(props: Props) {
                 // 优先旋转选中的对象，如果没有选中对象但鼠标在对象上，则旋转该对象
                 const indicesToRotate = selectedIndexes.length > 0 ? selectedIndexes : (hitObject && hitObjectIndex >= 0 ? [hitObjectIndex] : []);
 
+                // 检查是否存在 stage-main 的 setTransform，并且旋转的是立绘或背景
+                const stageMainSetTransformIdx = transforms.findIndex(t => t.type === 'setTransform' && t.target === 'stage-main');
+                const isRotatingFigureOrBg = indicesToRotate.some(idx => {
+                    const t = transforms[idx];
+                    return t && (t.type === 'changeFigure' || t.type === 'changeBg');
+                });
+
                 if (indicesToRotate.length > 0) {
                     setTransforms(prev => {
                         const copy = [...prev];
 
-                        indicesToRotate.forEach((idx) => {
-                            const targetTransform = prev[idx];
-                            if (!targetTransform) return;
-
-                            const setTransformIndices = findAllSetTransformsBeforeBreakpoint(copy, targetTransform.target, hasBreakpoint);
-
-                            if (setTransformIndices.length > 0) {
-                                // 更新所有相关的 setTransform 的 rotation
-                                setTransformIndices.forEach((setTransformIdx) => {
-                                    if (copy[setTransformIdx].transform.rotation === undefined) {
-                                        copy[setTransformIdx].transform.rotation = 0;
-                                    }
-                                    const currentRotation = copy[setTransformIdx].transform.rotation || 0;
-                                    const newRotation = currentRotation + rotationDelta;
-                                    copy[setTransformIdx].transform.rotation = newRotation;
-                                });
-                            } else {
-                                // 如果没有 setTransform，直接更新 changeFigure/changeBg 的 rotation
-                                if (copy[idx].transform.rotation === undefined) {
-                                    copy[idx].transform.rotation = 0;
-                                }
-                                copy[idx].transform.rotation = (copy[idx].transform.rotation || 0) + rotationDelta;
-
-                                // 同时也要创建一个 setTransform 来保存旋转值（如果需要）
-                                // 这里我们只更新现有的 transform，不创建新的 setTransform
+                        // 如果存在 stage-main 的 setTransform，并且旋转的是立绘或背景，则直接更新 stage-main
+                        if (stageMainSetTransformIdx !== -1 && isRotatingFigureOrBg) {
+                            const stageMainSetTransform = copy[stageMainSetTransformIdx];
+                            if (!stageMainSetTransform.transform.rotation) {
+                                stageMainSetTransform.transform.rotation = 0;
                             }
-                        });
+                            const currentRotation = stageMainSetTransform.transform.rotation || 0;
+                            stageMainSetTransform.transform.rotation = currentRotation + rotationDelta;
+                        } else {
+                            // 普通旋转逻辑
+                            indicesToRotate.forEach((idx) => {
+                                const targetTransform = prev[idx];
+                                if (!targetTransform) return;
+
+                                const setTransformIndices = findAllSetTransformsBeforeBreakpoint(copy, targetTransform.target, hasBreakpoint);
+
+                                if (setTransformIndices.length > 0) {
+                                    // 更新所有相关的 setTransform 的 rotation
+                                    setTransformIndices.forEach((setTransformIdx) => {
+                                        if (copy[setTransformIdx].transform.rotation === undefined) {
+                                            copy[setTransformIdx].transform.rotation = 0;
+                                        }
+                                        const currentRotation = copy[setTransformIdx].transform.rotation || 0;
+                                        const newRotation = currentRotation + rotationDelta;
+                                        copy[setTransformIdx].transform.rotation = newRotation;
+                                    });
+                                } else {
+                                    // 如果没有 setTransform，直接更新 changeFigure/changeBg 的 rotation
+                                    if (copy[idx].transform.rotation === undefined) {
+                                        copy[idx].transform.rotation = 0;
+                                    }
+                                    copy[idx].transform.rotation = (copy[idx].transform.rotation || 0) + rotationDelta;
+
+                                    // 同时也要创建一个 setTransform 来保存旋转值（如果需要）
+                                    // 这里我们只更新现有的 transform，不创建新的 setTransform
+                                }
+                            });
+                        }
 
                         return copy;
                     });
@@ -442,6 +510,33 @@ export default function CanvasRenderer(props: Props) {
                     if (mx >= cx - w / 2 && mx <= cx + w / 2 && my >= cy - h / 2 && my <= cy + h / 2) {
                         hitObject = true;
 
+                        // 检查是否存在 stage-main 的 setTransform
+                        const stageMainSetTransformIdx = transforms.findIndex(t => t.type === 'setTransform' && t.target === 'stage-main');
+                        const isScalingFigureOrBg = (selectedIndexes.length > 0 ? selectedIndexes : [index]).some(idx => {
+                            const t = transforms[idx];
+                            return t && (t.type === 'changeFigure' || t.type === 'changeBg');
+                        });
+
+                        // 如果存在 stage-main 的 setTransform，并且缩放的是立绘或背景，则直接更新 stage-main
+                        if (stageMainSetTransformIdx !== -1 && isScalingFigureOrBg) {
+                            setTransforms(prev => {
+                                const copy = [...prev];
+                                const stageMainSetTransform = copy[stageMainSetTransformIdx];
+                                const currentScale = stageMainSetTransform.transform.scale?.x || 1;
+                                const newScale = Math.max(0.1, currentScale + delta);
+                                if (!stageMainSetTransform.transform.scale) {
+                                    stageMainSetTransform.transform.scale = { x: 1, y: 1 };
+                                }
+                                const s = stageMainSetTransform.transform.scale;
+                                if (s) {
+                                    s.x = newScale;
+                                    s.y = newScale;
+                                }
+                                return copy;
+                            });
+                            break;
+                        }
+
                         // 如果有选中的对象，只缩放选中的对象（严格只缩放 selectedIndexes 中的项目，不包括背景）
                         if (selectedIndexes.length > 0) {
                             setTransforms(prev => {
@@ -457,8 +552,11 @@ export default function CanvasRenderer(props: Props) {
                                         if (!copy[selectedIndex].transform.scale) {
                                             copy[selectedIndex].transform.scale = { x: 1, y: 1 };
                                         }
-                                        copy[selectedIndex].transform.scale.x = newScale;
-                                        copy[selectedIndex].transform.scale.y = newScale;
+                                        const s = copy[selectedIndex].transform.scale;
+                                        if (s) {
+                                            s.x = newScale;
+                                            s.y = newScale;
+                                        }
 
                                         // 如果选中的是 changeFigure/changeBg，也需要更新对应的 setTransform（如果有）
                                         if ((selectedObj.type === 'changeFigure' || selectedObj.type === 'changeBg')) {
@@ -468,8 +566,11 @@ export default function CanvasRenderer(props: Props) {
                                                 if (!copy[setTransformIdx].transform.scale) {
                                                     copy[setTransformIdx].transform.scale = { x: 1, y: 1 };
                                                 }
-                                                copy[setTransformIdx].transform.scale.x = newScale;
-                                                copy[setTransformIdx].transform.scale.y = newScale;
+                                                const ss = copy[setTransformIdx].transform.scale;
+                                                if (ss) {
+                                                    ss.x = newScale;
+                                                    ss.y = newScale;
+                                                }
                                             }
                                         }
                                     }
@@ -499,8 +600,11 @@ export default function CanvasRenderer(props: Props) {
                                         if (!copy[setTransformIdx].transform.scale) {
                                             copy[setTransformIdx].transform.scale = { x: 1, y: 1 };
                                         }
-                                        copy[setTransformIdx].transform.scale.x = newScale;
-                                        copy[setTransformIdx].transform.scale.y = newScale;
+                                        const ss = copy[setTransformIdx].transform.scale;
+                                        if (ss) {
+                                            ss.x = newScale;
+                                            ss.y = newScale;
+                                        }
                                     }
                                 }
                                 return copy;
@@ -512,36 +616,68 @@ export default function CanvasRenderer(props: Props) {
 
                 // 如果没有点击到任何对象，但有选中的对象，则只缩放所有选中的对象（严格只缩放 selectedIndexes 中的对象）
                 if (!hitObject && selectedIndexes.length > 0) {
-                    setTransforms(prev => {
-                        const copy = [...prev];
-                        // 严格只缩放 selectedIndexes 中的对象
-                        selectedIndexes.forEach(selectedIndex => {
-                            const selectedObj = copy[selectedIndex];
-                            if (selectedObj) {
-                                const currentScale = selectedObj.transform.scale?.x || 1;
-                                const newScale = Math.max(0.1, currentScale + delta);
-                                if (!copy[selectedIndex].transform.scale) {
-                                    copy[selectedIndex].transform.scale = { x: 1, y: 1 };
-                                }
-                                copy[selectedIndex].transform.scale.x = newScale;
-                                copy[selectedIndex].transform.scale.y = newScale;
+                    // 检查是否存在 stage-main 的 setTransform
+                    const stageMainSetTransformIdx = transforms.findIndex(t => t.type === 'setTransform' && t.target === 'stage-main');
+                    const isScalingFigureOrBg = selectedIndexes.some(idx => {
+                        const t = transforms[idx];
+                        return t && (t.type === 'changeFigure' || t.type === 'changeBg');
+                    });
 
-                                // 如果选中的是 changeFigure/changeBg，也需要更新对应的 setTransform（如果有）
-                                if ((selectedObj.type === 'changeFigure' || selectedObj.type === 'changeBg')) {
-                                    const setTransformIdx = findLastSetTransform(copy, selectedObj.target);
-                                    if (setTransformIdx !== -1) {
-                                        // 如果 scale 不存在，先创建它
-                                        if (!copy[setTransformIdx].transform.scale) {
-                                            copy[setTransformIdx].transform.scale = { x: 1, y: 1 };
+                    // 如果存在 stage-main 的 setTransform，并且缩放的是立绘或背景，则直接更新 stage-main
+                    if (stageMainSetTransformIdx !== -1 && isScalingFigureOrBg) {
+                            setTransforms(prev => {
+                                const copy = [...prev];
+                                const stageMainSetTransform = copy[stageMainSetTransformIdx];
+                                const currentScale = stageMainSetTransform.transform.scale?.x || 1;
+                                const newScale = Math.max(0.1, currentScale + delta);
+                                if (!stageMainSetTransform.transform.scale) {
+                                    stageMainSetTransform.transform.scale = { x: 1, y: 1 };
+                                }
+                                const s = stageMainSetTransform.transform.scale;
+                                if (s) {
+                                    s.x = newScale;
+                                    s.y = newScale;
+                                }
+                                return copy;
+                            });
+                    } else {
+                        setTransforms(prev => {
+                            const copy = [...prev];
+                            // 严格只缩放 selectedIndexes 中的对象
+                            selectedIndexes.forEach(selectedIndex => {
+                                const selectedObj = copy[selectedIndex];
+                                if (selectedObj) {
+                                    const currentScale = selectedObj.transform.scale?.x || 1;
+                                    const newScale = Math.max(0.1, currentScale + delta);
+                                    if (!copy[selectedIndex].transform.scale) {
+                                        copy[selectedIndex].transform.scale = { x: 1, y: 1 };
+                                    }
+                                    const s = copy[selectedIndex].transform.scale;
+                                    if (s) {
+                                        s.x = newScale;
+                                        s.y = newScale;
+                                    }
+
+                                    // 如果选中的是 changeFigure/changeBg，也需要更新对应的 setTransform（如果有）
+                                    if ((selectedObj.type === 'changeFigure' || selectedObj.type === 'changeBg')) {
+                                        const setTransformIdx = findLastSetTransform(copy, selectedObj.target);
+                                        if (setTransformIdx !== -1) {
+                                            // 如果 scale 不存在，先创建它
+                                            if (!copy[setTransformIdx].transform.scale) {
+                                                copy[setTransformIdx].transform.scale = { x: 1, y: 1 };
+                                            }
+                                            const ss = copy[setTransformIdx].transform.scale;
+                                            if (ss) {
+                                                ss.x = newScale;
+                                                ss.y = newScale;
+                                            }
                                         }
-                                        copy[setTransformIdx].transform.scale.x = newScale;
-                                        copy[setTransformIdx].transform.scale.y = newScale;
                                     }
                                 }
-                            }
+                            });
+                            return copy;
                         });
-                        return copy;
-                    });
+                    }
                 }
             }
         };
@@ -566,15 +702,64 @@ export default function CanvasRenderer(props: Props) {
 
         Object.values(graphicsMapRef.current).forEach(g => g.destroy());
         graphicsMapRef.current = {};
+        Object.values(nameTextMapRef.current).forEach(t => t.destroy());
+        nameTextMapRef.current = {};
         spriteMap.current = {};
 
-        // 构建 target 到 setTransform 的映射（使用最后一个 setTransform）
-        // 从后往前遍历，确保保存的是最后一个 setTransform
+        // 收集所有 figure 和背景的 ID（用于展开 stage-main）
+        const allFigureIds = new Set<string>();
+        for (const t of transforms) {
+            if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target) {
+                allFigureIds.add(t.target);
+            }
+        }
+        
+        // 构建 target 到 setTransform 的映射
+        // 对于 stage-main：只影响在它之前的 changeFigure/changeBg
         const setTransformMap = new Map<string, TransformData>();
+        
+        // 首先，找到每个 target 的最后一个 changeFigure/changeBg 的索引
+        const targetToLastChangeIndex = new Map<string, number>();
+        for (let i = 0; i < transforms.length; i++) {
+            const t = transforms[i];
+            if ((t.type === "changeFigure" || t.type === "changeBg") && t.target) {
+                targetToLastChangeIndex.set(t.target, i);
+            }
+        }
+        
+        // 然后，找到每个 target 的最后一个普通 setTransform（非 stage-main）
         for (let i = transforms.length - 1; i >= 0; i--) {
             const t = transforms[i];
-            if (t.type === "setTransform" && t.target && !setTransformMap.has(t.target)) {
-                setTransformMap.set(t.target, t);
+            if (t.type === "setTransform" && t.target && t.target !== "stage-main") {
+                if (!setTransformMap.has(t.target)) {
+                    setTransformMap.set(t.target, t);
+                }
+            }
+        }
+        
+        // 最后，处理 stage-main：找到影响所有对象的 stage-main（最后一个）
+        // stage-main 将整个场景视为一个整体进行变换
+        let stageMainTransform: TransformData | null = null;
+        for (let i = transforms.length - 1; i >= 0; i--) {
+            const t = transforms[i];
+            if (t.type === "setTransform" && t.target === "stage-main") {
+                stageMainTransform = t;
+                break; // 找到最后一个 stage-main
+            }
+        }
+        
+        // 找出受 stage-main 影响的所有 target（在 stage-main 之前出现的）
+        const targetsAffectedByStageMain = new Set<string>();
+        if (stageMainTransform) {
+            const stageMainIndex = transforms.findIndex(t => t === stageMainTransform);
+            for (const [target, lastChangeIndex] of targetToLastChangeIndex.entries()) {
+                // 如果该 target 的最后一个 changeFigure/changeBg 在这个 stage-main 之前
+                if (lastChangeIndex < stageMainIndex) {
+                    // 只有当这个 target 还没有被其他 setTransform 映射过时才受 stage-main 影响
+                    if (!setTransformMap.has(target)) {
+                        targetsAffectedByStageMain.add(target);
+                    }
+                }
             }
         }
 
@@ -600,6 +785,10 @@ export default function CanvasRenderer(props: Props) {
                 targetsToRender.unshift(t); // 保持顺序，但只保留最后一个
             }
         }
+
+        // 创建 stage 容器，用于包含所有受 stage-main 影响的对象
+        const stageContainer = new PIXI.Container();
+        stageContainer.name = "stage-main-container";
 
         targetsToRender.forEach((t, index) => {
             // 跳过 rawText 类型，不渲染任何内容
@@ -712,8 +901,8 @@ export default function CanvasRenderer(props: Props) {
             let sprite: any;
             const figure = figureManager.getFigure(t.target);
             
-            if (figure?.sourceType === 'live2d' || figure?.sourceType === 'jsonl') {
-                // Live2D 模型：使用 Container 包装以确保事件能正确传递
+            if (figure?.sourceType === 'live2d' || figure?.sourceType === 'jsonl' || figure?.sourceType === 'webgal_mano') {
+                // Live2D 或 Mano 模型：使用 Container 包装以确保事件能正确传递
                 const wrapper = new PIXI.Container();
                 wrapper.addChild(displayObject);
                 
@@ -786,45 +975,89 @@ export default function CanvasRenderer(props: Props) {
                 const imgW = imgWidth || 1;
                 const imgH = imgHeight || 1;
 
-                const pathLower = (t.path || "").toLowerCase();
-                const isMygoLive2D =
-                    mygo3Mode &&
-                    pathLower.endsWith(".json");
+                const isLive2D = figure?.sourceType === 'live2d';
+                const isJsonl = figure?.sourceType === 'jsonl';
+                
+                // 确定该立绘实际使用的定位系统
+                let actualPositioning = positioningType;
+                
+                // 非 Live2D 立绘一律使用 4.5.13 定位 ('M_2_4')
+                if (!isLive2D && !isJsonl && figure?.sourceType !== 'webgal_mano') {
+                    actualPositioning = 'M_2_4';
+                }
+                
+                // JSONL 立绘在 MyGO 3.0.0 仍然使用 4.5.13 定位
+                if (isJsonl && actualPositioning === 'M_3_0_0') {
+                    actualPositioning = 'M_2_4';
+                }
 
                 let fitScale = Math.min(canvasWidth / imgW, canvasHeight / imgH);
 
-                if (isMygoLive2D) {
-                    fitScale *= 1.25;
+                // 根据定位系统调整缩放比例
+                switch (actualPositioning) {
+                    case 'M_2_3':
+                        fitScale *= 1.5;
+                        break;
+                    case 'M_3_0_0':
+                    case 'M_3_1_0':
+                        fitScale *= 1.25;
+                        break;
                 }
                 
                 // drawW/drawH 只使用 fitScale，用户缩放通过 container.scale 应用
                 drawW = imgW * fitScale;
                 drawH = imgH * fitScale;
 
-                // 垂直基线（与 addFigure 一致）
-                // 先以画布中线为基准，如果适配后的高度没有铺满，则把基线下移 (stageH - targetH)/2
+                // 垂直基线
+                // 默认居中
                 baseY = canvasHeight / 2;
-                const targetHNoUser = imgH * fitScale; // 不含用户缩放的原始适配高度（对基线判断用）
-                if (targetHNoUser < canvasHeight) {
+
+                // 根据定位系统调整垂直基线
+                // 如果适配后的高度没有铺满且不是 M_2_3，则把基线下移 (stageH - targetH)/2 (立绘贴底)
+                const targetHNoUser = imgH * fitScale; 
+                if (targetHNoUser < canvasHeight && actualPositioning !== 'M_2_3') {
                     baseY = canvasHeight / 2 + (canvasHeight - targetHNoUser) / 2;
                 }
 
-                // 水平预设位（使用最后一个 changeFigure 的预设位置）
-                const preset = getPreset(lastChangeFigure); // 'left' | 'center' | 'right'
-                const targetWNoUser = imgW * fitScale; // 不含用户缩放的原始适配宽度（基线用）
+                // 添加定位系统带来的垂直偏移量
+                let verticalOffset = 0;
+                switch (actualPositioning) {
+                    case 'M_2_3':
+                        verticalOffset = canvasHeight / 1.2 - canvasHeight / 2;
+                        break;
+                    case 'M_3_0_0':
+                    case 'M_3_1_0':
+                        verticalOffset = canvasHeight / 1.8 - canvasHeight / 2;
+                        break;
+                }
+                baseY += verticalOffset;
 
-                if (isMygoLive2D) {
-                    if (preset === 'left') {
-                        baseX = 850;
-                    } else if (preset === 'right') {
-                        baseX = 1710;
-                    } else {
-                        baseX = centerX;
+                // 水平预设位
+                const preset = getPreset(lastChangeFigure); // 'left' | 'center' | 'right'
+                const targetWNoUser = imgW * fitScale; 
+
+                if (preset === 'center') {
+                    baseX = canvasWidth / 2;
+                } else if (preset === 'left') {
+                    switch (actualPositioning) {
+                        case 'M_3_0_0':
+                        case 'M_3_1_0':
+                            baseX = canvasWidth / 2 - 430;
+                            break;
+                        default:
+                            baseX = targetWNoUser / 2;
+                            break;
                     }
-                } else {
-                    if (preset === 'center') baseX = canvasWidth / 2;
-                    if (preset === 'left') baseX = targetWNoUser / 2;
-                    if (preset === 'right') baseX = canvasWidth - targetWNoUser / 2;
+                } else if (preset === 'right') {
+                    switch (actualPositioning) {
+                        case 'M_3_0_0':
+                        case 'M_3_1_0':
+                            baseX = canvasWidth / 2 + 430;
+                            break;
+                        default:
+                            baseX = canvasWidth - targetWNoUser / 2;
+                            break;
+                    }
                 }
             }
 
@@ -833,7 +1066,7 @@ export default function CanvasRenderer(props: Props) {
             sprite.height = drawH;
             
             // 对于普通图片和 GIF，设置 anchor 和 hitArea（使用实际的渲染尺寸）
-            if (figure?.sourceType !== 'live2d' && figure?.sourceType !== 'jsonl') {
+            if (figure?.sourceType !== 'live2d' && figure?.sourceType !== 'jsonl' && figure?.sourceType !== 'webgal_mano') {
                 sprite.anchor?.set(0.5);
                 
                 // 在设置完尺寸后，设置 hitArea（使用实际的渲染尺寸 drawW 和 drawH）
@@ -860,6 +1093,7 @@ export default function CanvasRenderer(props: Props) {
             (container as any)._baseX = baseX;
             (container as any)._baseY = baseY;
             (container as any)._isBg = isBg;
+            (container as any)._drawH = drawH; // 保存 drawH 供文本定位使用
 
             const px = (transformToUse.position?.x ?? 0) * scaleX;
             const py = (transformToUse.position?.y ?? 0) * scaleY;
@@ -887,8 +1121,9 @@ export default function CanvasRenderer(props: Props) {
                     fontFamily: "Arial",
                 });
                 nameText.anchor.set(0.5);
-                nameText.position.set(container.x, container.y - drawH / 2 - 10);
-                stage.addChild(nameText);
+                // 相对于容器中心向上偏移
+                nameText.position.set(0, -drawH / 2 - 40);
+                container.addChild(nameText);
             }
 
             // 🧠 注册交互（只有启用的target才能交互）
@@ -973,20 +1208,39 @@ export default function CanvasRenderer(props: Props) {
 
                     // 保存初始位置（使用 setTransform 的 transform，如果有的话）
                     initialPositionsRef.current = {};
+                    
+                    // 检查是否存在 stage-main 的 setTransform
+                    const stageMainSetTransformIdx = transforms.findIndex(t => t.type === 'setTransform' && t.target === 'stage-main');
+                    const isDraggingFigureOrBg = (selectedIndexes.length > 0 ? selectedIndexes : [index]).some(idx => {
+                        const t = transforms[idx];
+                        return t && (t.type === 'changeFigure' || t.type === 'changeBg');
+                    });
+                    
+                    // 如果存在 stage-main 的 setTransform，并且拖动的是立绘或背景，则保存 stage-main 的初始位置
+                    if (stageMainSetTransformIdx !== -1 && isDraggingFigureOrBg) {
+                        const stageMainSetTransform = transforms[stageMainSetTransformIdx];
+                        const transformToUse = stageMainSetTransform.transform;
+                        initialPositionsRef.current[stageMainSetTransformIdx] = {
+                            x: transformToUse.position?.x ?? 0,
+                            y: transformToUse.position?.y ?? 0,
+                        };
+                    } else {
+                        // 普通情况：保存每个拖动对象的初始位置
                         const indicesToUpdate = selectedIndexes.length > 0 ? selectedIndexes : [index];
                         indicesToUpdate.forEach(idx => {
-                        const targetTransform = transforms[idx];
+                            const targetTransform = transforms[idx];
                             if (targetTransform) {
-                            // 查找对应的最后一个 setTransform
-                            const setTransformIdx = findLastSetTransform(transforms, targetTransform.target);
-                            const setTransform = setTransformIdx !== -1 ? transforms[setTransformIdx] : null;
-                            const transformToUse = setTransform ? setTransform.transform : targetTransform.transform;
-                            initialPositionsRef.current[idx] = {
-                                x: transformToUse.position?.x ?? 0,
-                                y: transformToUse.position?.y ?? 0,
-                            };
-                        }
-                    });
+                                // 查找对应的最后一个 setTransform
+                                const setTransformIdx = findLastSetTransform(transforms, targetTransform.target);
+                                const setTransform = setTransformIdx !== -1 ? transforms[setTransformIdx] : null;
+                                const transformToUse = setTransform ? setTransform.transform : targetTransform.transform;
+                                initialPositionsRef.current[idx] = {
+                                    x: transformToUse.position?.x ?? 0,
+                                    y: transformToUse.position?.y ?? 0,
+                                };
+                            }
+                        });
+                    }
 
                     const cx = container.x;
                     const cy = container.y;
@@ -1021,15 +1275,30 @@ export default function CanvasRenderer(props: Props) {
 
                         // 记录所有要旋转的对象的初始旋转角度
                         initialRotationRef.current = {};
-                        indicesToRotate.forEach((idx) => {
-                            const targetTransform = transforms[idx];
-                            if (targetTransform) {
-                                const setTransformIdx = findLastSetTransform(transforms, targetTransform.target);
-                                const setTransform = setTransformIdx !== -1 ? transforms[setTransformIdx] : null;
-                                const transformToUseForRot = setTransform ? setTransform.transform : targetTransform.transform;
-                                initialRotationRef.current[idx] = transformToUseForRot.rotation || 0;
-                            }
+                        
+                        // 检查是否存在 stage-main 的 setTransform
+                        const stageMainSetTransformIdx = transforms.findIndex(t => t.type === 'setTransform' && t.target === 'stage-main');
+                        const isRotatingFigureOrBg = indicesToRotate.some(idx => {
+                            const t = transforms[idx];
+                            return t && (t.type === 'changeFigure' || t.type === 'changeBg');
                         });
+                        
+                        // 如果存在 stage-main 的 setTransform，并且旋转的是立绘或背景，则保存 stage-main 的初始旋转角度
+                        if (stageMainSetTransformIdx !== -1 && isRotatingFigureOrBg) {
+                            const stageMainSetTransform = transforms[stageMainSetTransformIdx];
+                            initialRotationRef.current[stageMainSetTransformIdx] = stageMainSetTransform.transform.rotation || 0;
+                        } else {
+                            // 普通情况：保存每个对象的初始旋转角度
+                            indicesToRotate.forEach((idx) => {
+                                const targetTransform = transforms[idx];
+                                if (targetTransform) {
+                                    const setTransformIdx = findLastSetTransform(transforms, targetTransform.target);
+                                    const setTransform = setTransformIdx !== -1 ? transforms[setTransformIdx] : null;
+                                    const transformToUseForRot = setTransform ? setTransform.transform : targetTransform.transform;
+                                    initialRotationRef.current[idx] = transformToUseForRot.rotation || 0;
+                                }
+                            });
+                        }
 
                         console.log('🔄 Alt键按下，进入旋转模式', {
                             index,
@@ -1123,37 +1392,58 @@ export default function CanvasRenderer(props: Props) {
 
                             setTransforms((prev) => {
                                 const copy = [...prev];
-                                // 对所有要旋转的对象应用相同的旋转增量
-                                indicesToRotate.forEach((idx) => {
-                                    const targetTransform = prev[idx];
-                                    if (!targetTransform) return;
-
-                                    const setTransformIndices = findAllSetTransformsBeforeBreakpoint(copy, targetTransform.target, hasBreakpoint);
-                                    if (setTransformIndices.length > 0) {
-                                        // 获取该对象的初始旋转角度
-                                        const initialRot = initialRotationRef.current[idx];
-                                        if (initialRot !== undefined) {
-                                            const newRotation = initialRot + deltaAngle;
-
-                                            // 更新所有相关的 setTransform 的 rotation
-                                            setTransformIndices.forEach((setTransformIdx) => {
-                                                if (copy[setTransformIdx].transform.rotation === undefined) {
-                                                    copy[setTransformIdx].transform.rotation = 0;
-                                                }
-                                                copy[setTransformIdx].transform.rotation = newRotation;
-                                            });
-                                        }
-                                    } else {
-                                        // 如果没有 setTransform，直接更新 changeFigure/changeBg 的 rotation
-                                        const initialRot = initialRotationRef.current[idx];
-                                        if (initialRot !== undefined) {
-                                            if (copy[idx].transform.rotation === undefined) {
-                                                copy[idx].transform.rotation = 0;
-                                            }
-                                            copy[idx].transform.rotation = initialRot + deltaAngle;
-                                        }
-                                    }
+                                
+                                // 检查是否存在 stage-main 的 setTransform
+                                const stageMainSetTransformIdx = copy.findIndex(t => t.type === 'setTransform' && t.target === 'stage-main');
+                                const isRotatingFigureOrBg = indicesToRotate.some(idx => {
+                                    const t = prev[idx];
+                                    return t && (t.type === 'changeFigure' || t.type === 'changeBg');
                                 });
+                                
+                                // 如果存在 stage-main 的 setTransform，并且旋转的是立绘或背景，则直接更新 stage-main
+                                if (stageMainSetTransformIdx !== -1 && isRotatingFigureOrBg) {
+                                    const stageMainSetTransform = copy[stageMainSetTransformIdx];
+                                    const initialRot = initialRotationRef.current[stageMainSetTransformIdx];
+                                    if (initialRot !== undefined) {
+                                        if (!stageMainSetTransform.transform.rotation) {
+                                            stageMainSetTransform.transform.rotation = 0;
+                                        }
+                                        stageMainSetTransform.transform.rotation = initialRot + deltaAngle;
+                                    }
+                                } else {
+                                    // 普通旋转逻辑
+                                    // 对所有要旋转的对象应用相同的旋转增量
+                                    indicesToRotate.forEach((idx) => {
+                                        const targetTransform = prev[idx];
+                                        if (!targetTransform) return;
+
+                                        const setTransformIndices = findAllSetTransformsBeforeBreakpoint(copy, targetTransform.target, hasBreakpoint);
+                                        if (setTransformIndices.length > 0) {
+                                            // 获取该对象的初始旋转角度
+                                            const initialRot = initialRotationRef.current[idx];
+                                            if (initialRot !== undefined) {
+                                                const newRotation = initialRot + deltaAngle;
+
+                                                // 更新所有相关的 setTransform 的 rotation
+                                                setTransformIndices.forEach((setTransformIdx) => {
+                                                    if (copy[setTransformIdx].transform.rotation === undefined) {
+                                                        copy[setTransformIdx].transform.rotation = 0;
+                                                    }
+                                                    copy[setTransformIdx].transform.rotation = newRotation;
+                                                });
+                                            }
+                                        } else {
+                                            // 如果没有 setTransform，直接更新 changeFigure/changeBg 的 rotation
+                                            const initialRot = initialRotationRef.current[idx];
+                                            if (initialRot !== undefined) {
+                                                if (copy[idx].transform.rotation === undefined) {
+                                                    copy[idx].transform.rotation = 0;
+                                                }
+                                                copy[idx].transform.rotation = initialRot + deltaAngle;
+                                            }
+                                        }
+                                    });
+                                }
                                 return copy;
                             });
                         } else {
@@ -1171,44 +1461,88 @@ export default function CanvasRenderer(props: Props) {
                                 // 如果selectedIndexes为空，使用当前拖拽的对象
                                 const indicesToDrag = selectedIndexes.length > 0 ? selectedIndexes : (i !== null ? [i] : []);
 
-                                indicesToDrag.forEach((idx) => {
-                                    const initialPos = initialPositionsRef.current[idx];
-                                    if (initialPos) {
-                                        const targetTransform = prev[idx];
-                                        if (!targetTransform) return;
+                                // 检查是否存在 stage-main 的 setTransform
+                                const stageMainSetTransformIdx = copy.findIndex(t => t.type === 'setTransform' && t.target === 'stage-main');
+                                
+                                // 检查是否正在拖动立绘或背景（而不是 rawText 或其他）
+                                const isDraggingFigureOrBg = indicesToDrag.some(idx => {
+                                    const t = prev[idx];
+                                    return t && (t.type === 'changeFigure' || t.type === 'changeBg');
+                                });
 
-                                        // 查找该 target 在断点之前的所有 setTransform（如果有断点）
-                                        // 或者只查找最后一个 setTransform（如果没有断点）
-                                        const setTransformIndices = findAllSetTransformsBeforeBreakpoint(copy, targetTransform.target, hasBreakpoint);
-
-                                        if (setTransformIndices.length > 0) {
-                                            // 更新所有相关的 setTransform 的 position
-                                            setTransformIndices.forEach((setTransformIdx) => {
-                                                // 更新 setTransform 的 position（如果不存在则创建）
-                                                if (!copy[setTransformIdx].transform.position) {
-                                                    copy[setTransformIdx].transform.position = { x: 0, y: 0 };
-                                                }
-                                                if (!lockX) {
-                                                    copy[setTransformIdx].transform.position.x = initialPos.x + deltaX / scaleX;
-                                                }
-                                                if (!lockY) {
-                                                    copy[setTransformIdx].transform.position.y = initialPos.y + deltaY / scaleY;
-                                                }
-                                            });
-                                        } else {
-                                            // 如果没有 setTransform，使用原来的逻辑（不应该发生，但保险起见）
-                                            if (!copy[idx].transform.position) {
-                                                copy[idx].transform.position = { x: 0, y: 0 };
-                                            }
-                                            if (!lockX) {
-                                                copy[idx].transform.position.x = initialPos.x + deltaX / scaleX;
-                                            }
-                                            if (!lockY) {
-                                                copy[idx].transform.position.y = initialPos.y + deltaY / scaleY;
-                                            }
+                                // 如果存在 stage-main 的 setTransform，并且拖动的是立绘或背景，则直接拖动 stage-main
+                                if (stageMainSetTransformIdx !== -1 && isDraggingFigureOrBg) {
+                                    // 拖动 stage-main：直接更新 stage-main 的 setTransform
+                                    const stageMainSetTransform = copy[stageMainSetTransformIdx];
+                                    
+                                    // 获取初始位置（从第一个拖动对象的初始位置或 stage-main 的初始位置）
+                                    const firstDraggedIdx = indicesToDrag[0];
+                                    const initialPos = initialPositionsRef.current[stageMainSetTransformIdx] || 
+                                        initialPositionsRef.current[firstDraggedIdx] || 
+                                        (stageMainSetTransform.transform.position || { x: 0, y: 0 });
+                                    
+                                    // 更新 stage-main 的 setTransform
+                                    if (!stageMainSetTransform.transform.position) {
+                                        stageMainSetTransform.transform.position = { x: 0, y: 0 };
+                                    }
+                                    const p = stageMainSetTransform.transform.position;
+                                    if (p) {
+                                        if (!lockXRef.current) {
+                                            p.x = initialPos.x + deltaX / scaleX;
+                                        }
+                                        if (!lockYRef.current) {
+                                            p.y = initialPos.y + deltaY / scaleY;
                                         }
                                     }
-                                });
+                                    
+                                    // stage-main 的 transform 会在渲染时自动应用到所有立绘和背景，无需手动创建其他 setTransform
+                                } else {
+                                    // 普通拖动逻辑
+                                    indicesToDrag.forEach((idx) => {
+                                        const initialPos = initialPositionsRef.current[idx];
+                                        if (initialPos) {
+                                            const targetTransform = prev[idx];
+                                            if (!targetTransform) return;
+
+                                            // 查找该 target 在断点之前的所有 setTransform（如果有断点）
+                                            // 或者只查找最后一个 setTransform（如果没有断点）
+                                            const setTransformIndices = findAllSetTransformsBeforeBreakpoint(copy, targetTransform.target, hasBreakpoint);
+
+                                            if (setTransformIndices.length > 0) {
+                                                // 更新所有相关的 setTransform 的 position
+                                                setTransformIndices.forEach((setTransformIdx) => {
+                                                    // 更新 setTransform 的 position（如果不存在则创建）
+                                                    if (!copy[setTransformIdx].transform.position) {
+                                                        copy[setTransformIdx].transform.position = { x: 0, y: 0 };
+                                                    }
+                                                    const p = copy[setTransformIdx].transform.position;
+                                                    if (p) {
+                                                        if (!lockXRef.current) {
+                                                            p.x = initialPos.x + deltaX / scaleX;
+                                                        }
+                                                        if (!lockYRef.current) {
+                                                            p.y = initialPos.y + deltaY / scaleY;
+                                                        }
+                                                    }
+                                                });
+                                            } else {
+                                                // 如果没有 setTransform，使用原来的逻辑（不应该发生，但保险起见）
+                                                if (!copy[idx].transform.position) {
+                                                    copy[idx].transform.position = { x: 0, y: 0 };
+                                                }
+                                                const p = copy[idx].transform.position;
+                                                if (p) {
+                                                    if (!lockXRef.current) {
+                                                        p.x = initialPos.x + deltaX / scaleX;
+                                                    }
+                                                    if (!lockYRef.current) {
+                                                        p.y = initialPos.y + deltaY / scaleY;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
                                 return copy;
                             });
                         }
@@ -1232,29 +1566,123 @@ export default function CanvasRenderer(props: Props) {
             }
 
             // 📏 蓝色边框（可选显示）
-            // 如果启用了显示蓝色框选框，则所有模型都显示蓝色框
             if (showSelectionBox) {
                 const g = new PIXI.Graphics();
-                // 选中的对象使用更粗的线条和更亮的颜色，未选中的对象使用较细的线条
                 const isSelected = selectedIndexes.includes(index);
-                g.lineStyle(isSelected ? 3 : 2, isSelected ? 0x0000ff : 0x4169e1); // 选中：蓝色粗线，未选中：较淡蓝色细线
+                g.lineStyle(isSelected ? 3 : 2, isSelected ? 0x0000ff : 0x4169e1);
+                // 在容器本地坐标系 (0,0) 处绘制，自动跟随容器缩放
                 g.drawRect(-drawW / 2, -drawH / 2, drawW, drawH);
                 g.endFill();
-                g.position.set(container.x, container.y);
-                g.rotation = container.rotation;
-                g.pivot.set(0, 0);
-                stage.addChild(g);
+                container.addChild(g);
                 graphicsMapRef.current[t.target] = g;
             }
 
             spriteMap.current[t.target] = container;
             // 直接添加到stage，保持对象可交互
-            if (isBg) {
-                stage.addChildAt(container, 0); // 背景始终最底层
+            // 判断是否受 stage-main 影响
+            const isAffectedByStageMain = targetsAffectedByStageMain.has(t.target);
+            
+            if (isAffectedByStageMain) {
+                // 受 stage-main 影响的对象，添加到 stageContainer
+                if (isBg) {
+                    stageContainer.addChildAt(container, 0); // 背景始终最底层
+                } else {
+                    stageContainer.addChild(container);
+                }
             } else {
-                stage.addChild(container);
+                // 不受 stage-main 影响的对象，直接添加到 stage
+                if (isBg) {
+                    stage.addChildAt(container, 0); // 背景始终最底层
+                } else {
+                    stage.addChild(container);
+                }
             }
         });
+        
+        // 如果有 stage-main，对 stageContainer 应用 transform
+        if (stageMainTransform && stageMainTransform.transform && stageContainer.children.length > 0) {
+            const transform = stageMainTransform.transform;
+            
+            // 计算所有受 stage-main 影响对象的边界框，以确定场景的中心点
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            let hasObjects = false;
+            
+            stageContainer.children.forEach((child: any) => {
+                const container = child as any;
+                if (container.x !== undefined && container.y !== undefined) {
+                    hasObjects = true;
+                    // 考虑容器的大小来计算边界
+                    const bounds = container.getBounds();
+                    minX = Math.min(minX, bounds.left);
+                    maxX = Math.max(maxX, bounds.right);
+                    minY = Math.min(minY, bounds.top);
+                    maxY = Math.max(maxY, bounds.bottom);
+                }
+            });
+            
+            // 如果没有对象，使用画布中心
+            if (!hasObjects) {
+                minX = 0;
+                maxX = canvasWidth;
+                minY = 0;
+                maxY = canvasHeight;
+            }
+            
+            // 计算场景的中心点
+            const sceneCenterX = (minX + maxX) / 2;
+            const sceneCenterY = (minY + maxY) / 2;
+            
+            // 保存场景中心点和 stageContainer 的引用，供动画更新使用
+            sceneCenterRef.current = { x: sceneCenterX, y: sceneCenterY };
+            stageContainerRef.current = stageContainer;
+            
+            // 将容器内的对象的坐标转换为相对于场景中心的位置
+            stageContainer.children.forEach((child: any) => {
+                const container = child as any;
+                // 保存原始绝对位置
+                const originalX = container.x;
+                const originalY = container.y;
+                
+                // 转换为相对于场景中心的位置
+                container.x = originalX - sceneCenterX;
+                container.y = originalY - sceneCenterY;
+            });
+            
+            // stageContainer 的位置设置为场景中心 + stage-main 的 position 偏移
+            stageContainer.x = sceneCenterX;
+            stageContainer.y = sceneCenterY;
+            
+            // 对 stageContainer 应用 stage-main 的 transform
+            // position: 作为偏移量添加到 stageContainer 的位置
+            if (transform.position !== undefined) {
+                stageContainer.x += (transform.position.x || 0) * scaleX;
+                stageContainer.y += (transform.position.y || 0) * scaleY;
+            }
+            
+            // scale: 直接设置
+            if (transform.scale !== undefined) {
+                stageContainer.scale.set(transform.scale.x || 1, transform.scale.y || 1);
+            }
+            
+            // rotation: 直接设置（相对于场景中心旋转）
+            if (transform.rotation !== undefined) {
+                stageContainer.rotation = transform.rotation || 0;
+            }
+            
+            // 设置 pivot 点为中心，使旋转和缩放围绕场景中心进行
+            stageContainer.pivot.set(0, 0);
+            
+            // 将 stageContainer 添加到 stage（在背景之后）
+            const bgIndex = stage.children.findIndex((child: any) => {
+                const container = child;
+                return container && (container as any)._isBg === true;
+            });
+            if (bgIndex !== -1) {
+                stage.addChildAt(stageContainer, bgIndex + 1);
+            } else {
+                stage.addChildAt(stageContainer, 0);
+            }
+        }
         
         // 🎨 观察层：保持原始对象在stage上，在它们之上添加观察层
         if (overlayMode !== "none") {
@@ -1369,7 +1797,7 @@ export default function CanvasRenderer(props: Props) {
         if (existingGuideLines) {
             stage.addChild(existingGuideLines);
         }
-    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY, overlayMode, canvasWidth, canvasHeight, enabledTargets, enabledTargetsArray, showSelectionBox, showTargetId, mygo3Mode]);
+    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY, overlayMode, canvasWidth, canvasHeight, enabledTargets, enabledTargetsArray, showSelectionBox, showTargetId]);
 
     // 独立的辅助线渲染逻辑
     useEffect(() => {
@@ -1435,8 +1863,77 @@ export default function CanvasRenderer(props: Props) {
                 return;
             }
             
-            // 遍历所有动画状态，直接更新 Pixi 对象
+            // 检查是否存在 stage-main 容器，并收集在其中的对象的动画状态
+            const stageContainer = stageContainerRef.current;
+            const sceneCenter = sceneCenterRef.current;
+            const stageMainTargets = new Set<string>();
+            
+            if (stageContainer && sceneCenter) {
+                // 收集在 stageContainer 中的所有对象的 target
+                stageContainer.children.forEach((child: any) => {
+                    const container = child as any;
+                    // 从 container 中找到对应的 target（通过检查 spriteMap）
+                    for (const [target, c] of Object.entries(spriteMap.current)) {
+                        if (c === container) {
+                            stageMainTargets.add(target);
+                            break;
+                        }
+                    }
+                });
+                
+                // 如果有受 stage-main 影响的对象，需要合并它们的动画状态来更新 stageContainer
+                if (stageMainTargets.size > 0) {
+                    // 收集所有受 stage-main 影响的对象的动画状态
+                    // 由于 stage-main 的动画已经被展开为每个对象的动画，我们需要从其中一个对象提取 stage-main 的 transform
+                    // 实际上，stage-main 的动画状态应该存在于 animationState 中，target 应该是 "stage-main"
+                    const stageMainTransform = animationState.get('stage-main');
+                    
+                    if (stageMainTransform) {
+                        // 直接更新 stageContainer 的 transform
+                        const baseX = sceneCenter.x;
+                        const baseY = sceneCenter.y;
+                        
+                        // 更新 position
+                        if (stageMainTransform.position) {
+                            const px = (stageMainTransform.position.x ?? 0) * scaleX;
+                            const py = (stageMainTransform.position.y ?? 0) * scaleY;
+                            stageContainer.x = baseX + px;
+                            stageContainer.y = baseY + py;
+                        }
+                        
+                        // 更新 rotation
+                        if (stageMainTransform.rotation !== undefined) {
+                            stageContainer.rotation = stageMainTransform.rotation ?? 0;
+                        }
+                        
+                        // 更新 scale
+                        if (stageMainTransform.scale) {
+                            stageContainer.scale.set(
+                                stageMainTransform.scale.x ?? 1,
+                                stageMainTransform.scale.y ?? 1
+                            );
+                        }
+                    } else {
+                        // 如果没有 stage-main 的动画状态，尝试从展开后的对象动画中提取
+                        // 但是，由于对象的位置是相对于场景中心的，我们需要计算 stage-main 的 transform
+                        // 这很复杂，所以我们跳过 stageContainer 中的对象的单独更新
+                        // 这些对象应该只通过 stage-main 的动画来更新
+                    }
+                }
+            }
+            
+            // 遍历所有动画状态，直接更新 Pixi 对象（但跳过在 stageContainer 中的对象）
             animationState.forEach((transform, target) => {
+                // 如果 target 是 stage-main，已经在上面处理过了
+                if (target === 'stage-main') {
+                    return;
+                }
+                
+                // 如果对象在 stageContainer 中，跳过单独更新（它们会通过 stageContainer 更新）
+                if (stageMainTargets.has(target)) {
+                    return;
+                }
+                
                 const container = spriteMap.current[target];
                 if (!container) {
                     // 调试：如果容器不存在，打印警告
@@ -1488,6 +1985,18 @@ export default function CanvasRenderer(props: Props) {
                     if ((container as any)[key] !== undefined) {
                         (container as any)[key] = transform[key];
                     }
+                }
+
+                // 🔄 同步更新蓝色边框和角色名位置
+                const g = graphicsMapRef.current[target];
+                if (g) {
+                    g.position.set(container.x, container.y);
+                    g.rotation = container.rotation;
+                    g.scale.set(container.scale.x, container.scale.y);
+                }
+                const nt = nameTextMapRef.current[target];
+                if (nt) {
+                    nt.position.set(container.x, container.y - (container as any)._drawH / 2 - 10);
                 }
             });
             

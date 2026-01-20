@@ -362,16 +362,23 @@ fn scan_directory_recursive(dir_path: String) -> Result<Vec<String>, String> {
                 }
                 // 对于普通 JSON 文件，检查是否包含 Live2D 模型字段
                 else if ext_lower.as_str() == "json" {
+                    // 默认先根据文件名判断，增加鲁棒性
+                    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    let looks_like_model = file_name.to_lowercase().contains(".char.json") || 
+                                         file_name.to_lowercase().contains("model.json");
+                    
+                    let mut is_live2d_file = looks_like_model;
+                    let mut is_mano_file = looks_like_model;
+                    let parent_dir = path.parent();
+
                     if let Ok(content) = fs::read_to_string(&path) {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                            let mut is_live2d_file = false;
-                            let parent_dir = path.parent();
-                            
                             // 检查是否包含 model, textures, motions 字段（Cubism 2 格式）
                             if json.get("model").is_some() || 
                                json.get("textures").is_some() || 
                                json.get("motions").is_some() {
                                 is_live2d_file = true;
+                                // ... (textures extraction code continues)
                                 
                                 // 提取 textures 并加入排除列表
                                 if let Some(textures) = json.get("textures").and_then(|t| t.as_array()) {
@@ -439,9 +446,34 @@ fn scan_directory_recursive(dir_path: String) -> Result<Vec<String>, String> {
                                     }
                                 }
                             }
+                            // 检查是否包含 settings, assets, controller 字段 (Mano 格式)
+                            // 兼容 "setting" 或 "settings"
+                            if json.get("settings").is_some() || 
+                                    json.get("setting").is_some() || 
+                                    json.get("assets").is_some() || 
+                                    json.get("controller").is_some() {
+                                is_mano_file = true;
+                                
+                                // 提取 assets 中的 layers 并加入排除列表
+                                if let Some(assets) = json.get("assets") {
+                                    if let Some(layers) = assets.get("layers").and_then(|l| l.as_array()) {
+                                        for layer in layers {
+                                            if let Some(layer_path) = layer.get("path").and_then(|p| p.as_str()) {
+                                                // 使用 json 文件的父目录作为基准
+                                                if let Some(parent) = parent_dir {
+                                                    let img_full_path = parent.join(layer_path);
+                                                    if let Ok(img_relative) = img_full_path.strip_prefix(base_dir) {
+                                                        excluded_files.insert(img_relative.to_string_lossy().replace('\\', "/"));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             
-                            // 如果是 Live2D 文件，添加到结果列表中
-                            if is_live2d_file {
+                            // 如果是 Live2D 或 Mano 文件，添加到结果列表中
+                            if is_live2d_file || is_mano_file {
                                 let relative_path = path.strip_prefix(base_dir)
                                     .map_err(|e| format!("计算相对路径失败: {}", e))?;
                                 let relative_str = relative_path.to_string_lossy().replace('\\', "/");

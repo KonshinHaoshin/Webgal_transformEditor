@@ -62,13 +62,17 @@ export default function TransformEditor() {
   const [showSelectionBox, setShowSelectionBox] = useState(true);
   // 是否显示角色ID
   const [showTargetId, setShowTargetId] = useState(true);
-  // MyGO!!!!! 3.0 模式
-  const [mygo3Mode, setMygo3Mode] = useState(false);
+  // MyGO!!!!! 3.0 模式 (已弃用，由定位系统替代)
+  // const [mygo3Mode, setMygo3Mode] = useState(false);
   
   // 画幅比选择（高度固定为1440）
   type AspectRatio = '16:9' | '21:9' | '1.85:1' | '16:10' | '4:3' | 'custom';
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9');
   const [customWidth, setCustomWidth] = useState<number>(2560);
+
+  // 立绘定位系统
+  type PositioningType = 'M_2_3' | 'M_2_4' | 'M_3_0_0' | 'M_3_1_0';
+  const [positioningType, setPositioningType] = useState<PositioningType>('M_2_4');
   
   // 根据画幅比和固定高度计算宽度
   const calculateWidth = (ratio: AspectRatio, custom: number = 2560): number => {
@@ -166,6 +170,90 @@ export default function TransformEditor() {
     }, 500);
   };
 
+  // ⌨️ 方向键移动逻辑
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 如果正在输入，不处理方向键
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) {
+        return;
+      }
+
+      if (selectedIndexes.length === 0) return;
+
+      const step = e.shiftKey ? 10 : 1; // 按住 Shift 键移动 10 像素
+      let dx = 0;
+      let dy = 0;
+
+      switch (e.key) {
+        case "ArrowUp":
+          dy = -step;
+          break;
+        case "ArrowDown":
+          dy = step;
+          break;
+        case "ArrowLeft":
+          dx = -step;
+          break;
+        case "ArrowRight":
+          dx = step;
+          break;
+        default:
+          return;
+      }
+
+      e.preventDefault();
+
+      setTransforms((prev) => {
+        const copy = [...prev];
+        const hasBreakpoint = (breakpoints as any).size > 0;
+
+        selectedIndexes.forEach((idx) => {
+          const t = copy[idx];
+          if (!t) return;
+
+          // 找到该 target 在断点之前的所有 setTransform（如果有断点）
+          // 或者只找到最后一个 setTransform（如果没有断点）
+          const targetToUpdate = t.target;
+          const setTransformIndices: number[] = [];
+          
+          if (hasBreakpoint) {
+            for (let i = 0; i < copy.length; i++) {
+              if (copy[i].type === "setTransform" && copy[i].target === targetToUpdate) {
+                setTransformIndices.push(i);
+              }
+            }
+          } else {
+            for (let i = copy.length - 1; i >= 0; i--) {
+              if (copy[i].type === "setTransform" && copy[i].target === targetToUpdate) {
+                setTransformIndices.push(i);
+                break;
+              }
+            }
+          }
+
+          if (setTransformIndices.length > 0) {
+            setTransformIndices.forEach((stIdx) => {
+              const st = copy[stIdx];
+              if (!st.transform.position) st.transform.position = { x: 0, y: 0 };
+              st.transform.position.x = (st.transform.position.x || 0) + dx;
+              st.transform.position.y = (st.transform.position.y || 0) + dy;
+            });
+          } else if (t.type === 'changeFigure' || t.type === 'changeBg') {
+            // 如果没有 setTransform，直接更新 changeFigure/changeBg
+            if (!t.transform.position) t.transform.position = { x: 0, y: 0 };
+            t.transform.position.x = (t.transform.position.x || 0) + dx;
+            t.transform.position.y = (t.transform.position.y || 0) + dy;
+          }
+        });
+
+        return copy;
+      });
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedIndexes, breakpoints]);
+
   const handleFileSelect = async (type: 'figure' | 'background', filename: string) => {
     // 获取文件路径（可能是 blob URL 或 HTTP URL）
     const fileUrl = await webgalFileManager[type === 'figure' ? 'getFigurePath' : 'getBackgroundPath'](filename);
@@ -190,26 +278,35 @@ export default function TransformEditor() {
 
     // 检测文件类型（检查扩展名）
     const ext = filePath.split('.').pop()?.toLowerCase();
-    const isLive2D = ext === 'json' || ext === 'jsonl';
+    const isJsonOrJsonl = ext === 'json' || ext === 'jsonl';
+    const isMano = filePath.toLowerCase().includes('.char.json') || filePath.includes('type=webgal_mano');
 
     if (type === 'figure') {
       // 生成新的 figure id
       const figureId = nextFigureName(transforms);
 
-      if (isLive2D) {
-        // Live2D 模型（json/jsonl）：等待加载完成后再添加 transform
-        console.log(`✅ 准备加载 Live2D 模型: ${filename}`);
+      if (isJsonOrJsonl) {
+        // 如果是 Mano 文件，自动添加参数
+        let finalPath = filePath;
+        // 如果是 .char.json 或者是满足 Mano 结构的 JSON
+        // 自动添加 type=webgal_mano
+        if (isMano && !finalPath.includes('type=webgal_mano')) {
+          finalPath = `${finalPath}?type=webgal_mano`;
+        }
+
+        // Live2D 或 Mano 模型：等待加载完成后再添加 transform
+        console.log(`✅ 准备加载模型: ${filename} (Mano: ${isMano})`);
         
         try {
           // 先加载模型
-          await figureManager.addFigure(figureId, fileUrl, filePath);
-          console.log(`✅ Live2D 模型加载成功: ${filename}`);
+          await figureManager.addFigure(figureId, fileUrl, finalPath);
+          console.log(`✅ 模型加载成功: ${filename}`);
           
           // 加载完成后再添加到 transforms
           setTransforms(prev => {
             const newChangeFigure: TransformData = {
               type: "changeFigure",
-              path: filePath,
+              path: finalPath,
               target: figureId,
               duration: 0,
               transform: {
@@ -224,8 +321,8 @@ export default function TransformEditor() {
             return newTransforms;
           });
         } catch (error) {
-          console.error(`❌ Live2D 模型加载失败: ${filename}`, error);
-          alert(`Live2D 模型加载失败: ${error}`);
+          console.error(`❌ 模型加载失败: ${filename}`, error);
+          alert(`模型加载失败: ${error}`);
         }
       } else {
         // 普通图片：也通过 figureManager 加载，不设置全局 modelImg
@@ -284,7 +381,7 @@ export default function TransformEditor() {
       }
     } else {
       // 背景文件（通常不会是 json/jsonl，但为了安全也检查一下）
-      if (isLive2D) {
+      if (isJsonOrJsonl) {
         console.warn(`⚠️ 背景文件不支持 Live2D 格式: ${filename}`);
         return;
       }
@@ -1343,7 +1440,7 @@ export default function TransformEditor() {
   return (
     <div
       className="transform-editor-container"
-      style={{ maxHeight: "100vh", overflowY: "auto", padding: "20px", boxSizing: "border-box" }}
+      style={{ maxHeight: "100vh", overflowY: "auto", boxSizing: "border-box", margin: "0 auto" }}
     >
       <h2>EASTMOUNT WEBGAL TRANSFORM EDITOR</h2>
 
@@ -1428,6 +1525,36 @@ export default function TransformEditor() {
           <span style={{ fontSize: "14px", color: "#666", whiteSpace: "nowrap" }}>
             当前画幅：{canvasWidth} × {canvasHeight}
           </span>
+
+          <div style={{ marginLeft: "auto", display: "flex", gap: "12px", alignItems: "center" }}>
+            <label style={{ 
+              fontSize: "14px", 
+              fontWeight: "600", 
+              color: "#374151",
+              whiteSpace: "nowrap"
+            }}>
+              定位系统：
+            </label>
+            <select
+              value={positioningType}
+              onChange={(e) => setPositioningType(e.target.value as PositioningType)}
+              aria-label="选择定位系统"
+              title="选择定位系统"
+              style={{
+                padding: "6px 12px",
+                fontSize: "14px",
+                border: "1px solid #d1d5db",
+                borderRadius: "4px",
+                backgroundColor: "#ffffff",
+                cursor: "pointer"
+              }}
+            >
+              <option value="M_2_3">4.4.12 (M_2_3)</option>
+              <option value="M_2_4">4.5.13 (M_2_4)</option>
+              <option value="M_3_0_0">MyGO 3.0.0 (M_3_0_0)</option>
+              <option value="M_3_1_0">MyGO 3.1.0 (M_3_1_0)</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -1908,6 +2035,7 @@ export default function TransformEditor() {
             </span>
           </label>
         
+{/* 
         <label style={{ display: "flex", alignItems: "center" }}>
           <input
             type="checkbox"
@@ -1919,82 +2047,183 @@ export default function TransformEditor() {
             MyGO!!!!! 3.0 模式
           </span>
         </label>
+        */}
         </div>
         
         {/* 立绘和背景启用列表 */}
         <div style={{ marginTop: 20 }}>
-          <label style={{ display: "block", marginBottom: 10, fontWeight: "bold", color: "#333" }}>
-            启用立绘和背景：
-          </label>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <label style={{ fontWeight: "bold", color: "#333" }}>
+              启用交互对象：
+            </label>
+            <div style={{ display: "flex", gap: "8px" }}>
+              {(() => {
+                const allTargets = new Set<string>();
+                const targetToLastIndex = new Map<string, number>();
+                transforms.forEach((t, idx) => {
+                  if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target) {
+                    allTargets.add(t.target);
+                    targetToLastIndex.set(t.target, idx);
+                  }
+                });
+
+                const areAllEnabled = allTargets.size > 0 && Array.from(allTargets).every(t => enabledTargets.has(t));
+                const lastIndices = Array.from(targetToLastIndex.values());
+                const areAllSelected = lastIndices.length > 0 && lastIndices.every(idx => selectedIndexes.includes(idx));
+
+                return (
+                  <button 
+                    onClick={() => {
+                      if (!areAllEnabled) {
+                        // 第一次点击：全启用
+                        setEnabledTargets(new Set(allTargets));
+                      } else if (!areAllSelected) {
+                        // 第二次点击：全选中
+                        setSelectedIndexesFiltered(lastIndices);
+                      } else {
+                        // 第三次点击：取消全选和全启用
+                        setEnabledTargets(new Set());
+                        setSelectedIndexesFiltered([]);
+                      }
+                    }}
+                    style={{
+                      padding: "4px 12px",
+                      fontSize: "12px",
+                      cursor: "pointer",
+                      borderRadius: "4px",
+                      border: "none",
+                      background: areAllSelected ? "#ef4444" : (areAllEnabled ? "#2563eb" : "#3b82f6"),
+                      color: "#fff",
+                      fontWeight: "600",
+                      transition: "all 0.2s"
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = areAllSelected ? "#dc2626" : "#1d4ed8"}
+                    onMouseLeave={(e) => e.currentTarget.style.background = areAllSelected ? "#ef4444" : (areAllEnabled ? "#2563eb" : "#3b82f6")}
+                  >
+                    全选
+                  </button>
+                );
+              })()}
+              <button 
+                onClick={() => {
+                  setEnabledTargets(new Set());
+                  setSelectedIndexesFiltered([]);
+                }}
+                style={{
+                  padding: "4px 12px",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                  borderRadius: "4px",
+                  border: "none",
+                  background: "#64748b",
+                  color: "#fff",
+                  fontWeight: "600",
+                  transition: "all 0.2s"
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = "#475569"}
+                onMouseLeave={(e) => e.currentTarget.style.background = "#64748b"}
+              >
+                清空
+              </button>
+            </div>
+          </div>
           <div style={{ 
             display: "flex",
             flexWrap: "wrap",
-            gap: "12px",
+            gap: "8px",
             alignItems: "center",
-            border: "1px solid #ddd", 
-            borderRadius: "4px", 
-            padding: "10px",
-            backgroundColor: "#f9f9f9"
+            border: "1px solid #eee", 
+            borderRadius: "6px", 
+            padding: "12px",
+            backgroundColor: "#fff"
           }}>
             {(() => {
-              // 提取所有立绘和背景的 target
               const targets = new Set<string>();
               transforms.forEach(t => {
-                if (t.type === 'changeFigure' || t.type === 'changeBg') {
+                if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target) {
                   targets.add(t.target);
                 }
               });
               
               if (targets.size === 0) {
-                return <div style={{ color: "#999", fontStyle: "italic" }}>暂无立绘或背景</div>;
+                return <div style={{ color: "#999", fontStyle: "italic", fontSize: "13px" }}>暂无立绘或背景</div>;
               }
               
-              return Array.from(targets).map(target => {
-                const transform = transforms.find(t => 
-                  (t.type === 'changeFigure' || t.type === 'changeBg') && t.target === target
-                );
-                const isBg = transform?.type === 'changeBg' || target === 'bg-main';
+              return Array.from(targets).sort().map(target => {
+                const isEnabled = enabledTargets.has(target);
+                // 检查该 target 的任何一个实例是否被选中
+                const isSelected = selectedIndexes.some(idx => transforms[idx]?.target === target);
                 
+                const transform = transforms.find(t => t.target === target);
+                const isBg = target === 'bg-main' || transform?.type === 'changeBg';
+                
+                // 颜色逻辑：选中(红) > 启用(蓝/紫) > 禁用(灰)
+                let borderColor = "#e2e8f0";
+                let backgroundColor = "#fff";
+                let textColor = "#64748b";
+                let dotColor = "#cbd5e1";
+
+                if (isSelected) {
+                  borderColor = "#ef4444";
+                  backgroundColor = "#fef2f2";
+                  textColor = "#b91c1c";
+                  dotColor = "#ef4444";
+                } else if (isEnabled) {
+                  borderColor = isBg ? "#8b5cf6" : "#2563eb";
+                  backgroundColor = isBg ? "#f5f3ff" : "#eff6ff";
+                  textColor = isBg ? "#6d28d9" : "#1d4ed8";
+                  dotColor = isBg ? "#8b5cf6" : "#2563eb";
+                }
+
                 return (
-                  <label 
+                  <button 
                     key={target}
+                    onClick={() => {
+                      if (!isEnabled) {
+                        // 第一次点击：变蓝（启用）
+                        setEnabledTargets(new Set(enabledTargets).add(target));
+                      } else if (!isSelected) {
+                        // 第二次点击：变红（选中）
+                        // 找到该 target 的最后一个 changeFigure/changeBg 索引并选中
+                        const lastIdx = transforms.reduce((last, t, idx) => 
+                          (t.target === target && (t.type === 'changeFigure' || t.type === 'changeBg')) ? idx : last, -1
+                        );
+                        if (lastIdx !== -1) {
+                          setSelectedIndexesFiltered([lastIdx]);
+                        }
+                      } else {
+                        // 第三次点击：取消选中和启用
+                        const newEnabled = new Set(enabledTargets);
+                        newEnabled.delete(target);
+                        setEnabledTargets(newEnabled);
+                        setSelectedIndexesFiltered(prev => prev.filter(idx => transforms[idx]?.target !== target));
+                      }
+                    }}
                     style={{ 
-                      display: "flex", 
-                      alignItems: "center", 
+                      padding: "6px 12px",
+                      fontSize: "13px",
                       cursor: "pointer",
-                      userSelect: "none",
-                      whiteSpace: "nowrap"
+                      borderRadius: "20px",
+                      border: "1px solid",
+                      borderColor: borderColor,
+                      background: backgroundColor,
+                      color: textColor,
+                      fontWeight: (isEnabled || isSelected) ? "600" : "normal",
+                      transition: "all 0.2s",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      boxShadow: (isEnabled || isSelected) ? "0 2px 4px rgba(0,0,0,0.05)" : "none"
                     }}
                   >
-                    <input
-                      type="checkbox"
-                      checked={enabledTargets.has(target)}
-                      onChange={(e) => {
-                        const newEnabled = new Set(enabledTargets);
-                        if (e.target.checked) {
-                          newEnabled.add(target);
-                        } else {
-                          newEnabled.delete(target);
-                          // 如果取消勾选，同时取消选中该target的项目
-                          setSelectedIndexesFiltered(prev => {
-                            return prev.filter(idx => {
-                              const t = transforms[idx];
-                              return t.target !== target;
-                            });
-                          });
-                        }
-                        // 创建新的 Set 对象以触发 React 重新渲染
-                        setEnabledTargets(new Set(newEnabled));
-                      }}
-                      style={{ marginRight: "6px", cursor: "pointer" }}
-                    />
                     <span style={{ 
-                      color: isBg ? "#e74c3c" : "#333",
-                      fontWeight: isBg ? "bold" : "normal"
-                    }}>
-                      {target}
-                    </span>
-                  </label>
+                      width: "8px", 
+                      height: "8px", 
+                      borderRadius: "50%", 
+                      background: dotColor 
+                    }} />
+                    {target}
+                  </button>
                 );
               });
             })()}
@@ -2060,10 +2289,11 @@ export default function TransformEditor() {
           enabledTargetsArray={Array.from(enabledTargets)}
           showSelectionBox={showSelectionBox}
           showTargetId={showTargetId}
-          mygo3Mode={mygo3Mode}
+          // mygo3Mode={mygo3Mode}
           breakpoints={breakpoints}
           fullOutputScriptLines={fullOutputScriptLinesRef.current}
           outputScriptLines={outputScriptLines}
+          positioningType={positioningType}
         />
       </div>
 
@@ -2096,13 +2326,15 @@ export default function TransformEditor() {
             onChangeScale={(index, axis, newScale) => {
               setTransforms((prev) => {
                 const copy = [...prev];
-                if (!copy[index].transform.scale) {
-                  copy[index].transform.scale = { x: 1, y: 1 };
+                const transform = copy[index];
+                if (!transform) return copy;
+                if (!transform.transform.scale) {
+                  transform.transform.scale = { x: 1, y: 1 };
                 }
                 if (axis === 'x') {
-                  copy[index].transform.scale.x = newScale;
+                  transform.transform.scale.x = newScale;
                 } else {
-                  copy[index].transform.scale.y = newScale;
+                  transform.transform.scale.y = newScale;
                 }
                 return copy;
               });
@@ -2110,7 +2342,23 @@ export default function TransformEditor() {
             onChangeMotion={(index, newMotion) => {
               setTransforms((prev) => {
                 const copy = [...prev];
-                copy[index] = { ...copy[index], motion: newMotion || undefined };
+                const transform = copy[index];
+                if (!transform) return copy;
+                // 检查是否是 Mano 文件
+                const isMano = transform.path?.includes('type=webgal_mano');
+                if (isMano) {
+                  // Mano 文件：将 pose 保存到 extraParams.pose
+                  const extraParams = { ...transform.extraParams };
+                  if (newMotion) {
+                    extraParams.pose = newMotion;
+                  } else {
+                    delete extraParams.pose;
+                  }
+                  copy[index] = { ...transform, extraParams };
+                } else {
+                  // Live2D 文件：保存到 motion
+                  copy[index] = { ...transform, motion: newMotion || undefined };
+                }
                 return copy;
               });
             }}

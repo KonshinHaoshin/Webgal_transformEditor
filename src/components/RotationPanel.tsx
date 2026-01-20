@@ -37,10 +37,11 @@ export default function RotationPanel({
             for (const index of selectedIndexes) {
                 const t = transforms[index];
                 if (t.type === 'changeFigure' && t.path) {
-                    // 检查是否是 JSONL 或 JSON 文件
+                    // 检查是否是 JSONL 或 JSON 文件，或者是 Mano 模型
                     const isJsonl = t.path.toLowerCase().endsWith('.jsonl');
                     const isJson = t.path.toLowerCase().endsWith('.json');
-                    if ((isJsonl || isJson) && !newMotionsMap.has(t.path)) {
+                    const isMano = t.path.includes('type=webgal_mano');
+                    if ((isJsonl || isJson || isMano) && !newMotionsMap.has(t.path)) {
                         try {
                             const { motions, expressions } = await extractMotionsAndExpressions(t.path);
                             newMotionsMap.set(t.path, motions);
@@ -223,7 +224,7 @@ export default function RotationPanel({
             {/* Live2D Motion 和 Expression 选择器（仅对 changeFigure 类型显示） */}
             {selectedIndexes.some(idx => transforms[idx]?.type === 'changeFigure') && (
                 <>
-                    <h3 style={{ marginTop: 30 }}>Live2D 动作和表情</h3>
+                    <h3 style={{ marginTop: 30 }}>立绘动作和表情</h3>
                     
                     {selectedIndexes.map((index) => {
                         const t = transforms[index];
@@ -231,9 +232,11 @@ export default function RotationPanel({
 
                         const isJsonl = t.path?.toLowerCase().endsWith('.jsonl');
                         const isJson = t.path?.toLowerCase().endsWith('.json');
-                        const motions = (isJsonl || isJson) ? getMotions(t.path) : [];
-                        const expressions = (isJsonl || isJson) ? getExpressions(t.path) : [];
-                        const currentMotion = t.motion || '';
+                        const isMano = t.path?.includes('type=webgal_mano');
+                        const motions = (isJsonl || isJson || isMano) ? getMotions(t.path) : [];
+                        const expressions = (isJsonl || isJson) && !isMano ? getExpressions(t.path) : [];
+                        // 对于 Mano，使用 extraParams.pose；对于 Live2D，使用 motion
+                        const currentMotion = isMano ? (t.extraParams?.pose || '') : (t.motion || '');
                         const currentExpression = t.expression || '';
 
                         return (
@@ -247,27 +250,39 @@ export default function RotationPanel({
                                         </span>
                                     </label>
 
-                                    {/* Motion 选择器 */}
-                                    {(isJsonl || isJson) && onChangeMotion && (
-                                        <label>
-                                            Motion:
-                                            <select
-                                                value={currentMotion}
-                                                onChange={(e) => onChangeMotion(index, e.target.value)}
-                                                style={{ marginLeft: 6, minWidth: 150 }}
-                                            >
-                                                <option value="">无动作</option>
-                                                {motions.map((motion) => (
-                                                    <option key={motion} value={motion}>
-                                                        {motion}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </label>
+                                    {/* Motion 选择器（Live2D）或 Pose 输入框（Mano） */}
+                                    {(isJsonl || isJson || isMano) && onChangeMotion && (
+                                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                            <label>
+                                                {isMano ? 'Pose:' : 'Motion:'}
+                                                {isMano ? (
+                                                    <input
+                                                        type="text"
+                                                        value={currentMotion}
+                                                        onChange={(e) => onChangeMotion(index, e.target.value)}
+                                                        placeholder="例如: Angry1,ArmR1,Cheeks-Flushed"
+                                                        style={{ marginLeft: 6, width: 250 }}
+                                                    />
+                                                ) : (
+                                                    <select
+                                                        value={currentMotion}
+                                                        onChange={(e) => onChangeMotion(index, e.target.value)}
+                                                        style={{ marginLeft: 6, minWidth: 150 }}
+                                                    >
+                                                        <option value="">无动作</option>
+                                                        {motions.map((motion) => (
+                                                            <option key={motion} value={motion}>
+                                                                {motion}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                )}
+                                            </label>
+                                        </div>
                                     )}
 
-                                    {/* Expression 选择器 */}
-                                    {(isJsonl || isJson) && onChangeExpression && (
+                                    {/* Expression 选择器（仅 Live2D，Mano 不使用） */}
+                                    {(isJsonl || isJson) && !isMano && onChangeExpression && (
                                         <label>
                                             Expression:
                                             <select
@@ -285,9 +300,9 @@ export default function RotationPanel({
                                         </label>
                                     )}
 
-                                    {!(isJsonl || isJson) && (
+                                    {!(isJsonl || isJson || isMano) && (
                                         <span style={{ color: "#999", fontSize: "12px" }}>
-                                            （仅 JSON/JSONL 文件支持动作和表情选择）
+                                            （仅 JSON/JSONL/Mano 文件支持动作和表情选择）
                                         </span>
                                     )}
                                 </div>

@@ -83,11 +83,16 @@ export class WebGALFileManager {
     async getFigurePath(filename: string): Promise<string | null> {
         if (!this.gameFolder) return null;
         
+        // 剥离查询参数以进行文件匹配
+        const queryIndex = filename.indexOf('?');
+        const cleanFilename = queryIndex !== -1 ? filename.substring(0, queryIndex) : filename;
+        const queryParams = queryIndex !== -1 ? filename.substring(queryIndex) : '';
+        
         // 查找匹配的文件（支持子目录路径）
         const found = this.figureFiles.find(f => 
-            f === filename || 
-            f.endsWith(filename) || 
-            f.endsWith(`/${filename}`)
+            f === cleanFilename || 
+            f.endsWith(cleanFilename) || 
+            f.endsWith(`/${cleanFilename}`)
         );
         
         if (!found) {
@@ -95,18 +100,16 @@ export class WebGALFileManager {
             return null;
         }
         
-        // Live2D 文件需要使用 HTTP URL
+        // Live2D 或 Mano 文件需要使用 HTTP URL
         const ext = found.split('.').pop()?.toLowerCase();
         if (ext === 'json' || ext === 'jsonl') {
             if (this.fileServerBaseUrl) {
-                // 使用本地文件服务器 URL（服务器 base_path 是游戏目录，需要加上 game/figure 前缀）
-                console.log('🔍 扫描到的文件路径:', found);
-                console.log('🔍 游戏目录:', this.gameFolder);
-                const httpUrl = `${this.fileServerBaseUrl}/game/figure/${found}`;
-                console.log('✅ Live2D 文件使用 HTTP URL:', httpUrl);
+                // 使用本地文件服务器 URL
+                const httpUrl = `${this.fileServerBaseUrl}/game/figure/${found}${queryParams}`;
+                console.log('✅ 模型文件使用 HTTP URL:', httpUrl);
                 return httpUrl;
             } else {
-                console.warn('⚠️ 文件服务器未启动，Live2D 可能无法加载');
+                console.warn('⚠️ 模型文件服务器未启动，模型可能无法加载');
                 return null;
             }
         }

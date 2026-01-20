@@ -46,10 +46,75 @@ export function exportScript(
     const scaleRatioX = baseWidth / canvasWidth;
     const scaleRatioY = baseHeight / canvasHeight;
 
-    return transforms.map(obj => {
+    // 先找到所有在 stage-main 之前的 target
+    const targetToLastChangeIndex = new Map<string, number>();
+    for (let i = 0; i < transforms.length; i++) {
+        const t = transforms[i];
+        if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target) {
+            targetToLastChangeIndex.set(t.target, i);
+        }
+    }
+    
+    // 找到每个 target 的最后一个 changeFigure/changeBg，用于计算叠加后的位置
+    const targetToChangeFigure = new Map<string, TransformData>();
+    for (let i = transforms.length - 1; i >= 0; i--) {
+        const t = transforms[i];
+        if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target && !targetToChangeFigure.has(t.target)) {
+            targetToChangeFigure.set(t.target, t);
+        }
+    }
+
+    const result: string[] = [];
+    
+    for (let i = 0; i < transforms.length; i++) {
+        const obj = transforms[i];
+        
         // 如果是原始文本类型，直接返回原始文本
         if (obj.type === "rawText" && obj.rawText) {
-            return obj.rawText;
+            result.push(obj.rawText);
+            continue;
+        }
+
+        // stage-main 保持原样，不展开
+        if (obj.type === "setTransform" && obj.target === "stage-main") {
+            // 直接导出 stage-main 格式，不展开
+            // 应用缩放比例到 transform
+            const transform: any = {};
+            
+            if (obj.transform.position !== undefined) {
+                transform.position = {
+                    x: obj.transform.position.x * scaleRatioX,
+                    y: obj.transform.position.y * scaleRatioY,
+                };
+            }
+            
+            if (obj.transform.scale !== undefined) {
+                transform.scale = obj.transform.scale;
+            }
+            
+            if (obj.transform.rotation !== undefined) {
+                transform.rotation = obj.transform.rotation;
+            }
+            
+            // 添加所有其他属性（滤镜参数等）
+            for (const key in obj.transform) {
+                if (key !== 'position' && key !== 'scale' && key !== 'rotation') {
+                    transform[key] = obj.transform[key];
+                }
+            }
+            
+            const roundedTransform = roundTransform(transform);
+            const transformJson = JSON.stringify(roundedTransform);
+            
+            let easeParam = "";
+            if (obj.ease !== undefined && obj.ease !== "") {
+                easeParam = ` -ease=${obj.ease}`;
+            } else if (obj.ease === "" && defaultEase && defaultEase !== "default") {
+                easeParam = ` -ease=${defaultEase}`;
+            }
+            const nextParam = obj.next ? " -next" : "";
+            result.push(`setTransform:${transformJson} -target=stage-main -duration=${exportDuration}${easeParam}${nextParam};`);
+            continue;
         }
 
         // 构建导出用的 transform 对象，确保保留所有属性（包括滤镜参数）
@@ -100,7 +165,7 @@ export function exportScript(
             // 如果 transform 是空对象，导出 setTransform:{} 格式
             // 如果 next 为 true，添加 -next 参数
             const nextParam = obj.next ? " -next" : "";
-            return `setTransform:${transformJson} -target=${obj.target} -duration=${exportDuration}${easeParam}${nextParam};`;
+            result.push(`setTransform:${transformJson} -target=${obj.target} -duration=${exportDuration}${easeParam}${nextParam};`);
         }
 
         if (obj.type === "changeFigure") {
@@ -116,25 +181,56 @@ export function exportScript(
             const roundedTransform = roundTransform(transform);
             const transformJson = JSON.stringify(roundedTransform);
 
+            const isMano = obj.path?.includes('type=webgal_mano');
             // extras：无值参数输出成 "-k"，有值参数输出 "-k=v"
             const extras = Object.entries(obj.extraParams || {})
-                .map(([k, v]) => (v === "" || v === undefined) ? ` -${k}` : ` -${k}=${v}`)
+                .filter(([k]) => k !== "poseExtra") // 显式过滤掉 poseExtra
+                .map(([k, v]) => {
+                    // 特殊处理 Mano 的 pose 参数，自动包裹 {}
+                    if (isMano && k === 'pose' && typeof v === 'string' && v && !v.startsWith('{')) {
+                        return ` -pose={${v}}`;
+                    }
+                    return (v === "" || v === undefined) ? ` -${k}` : ` -${k}=${v}`;
+                })
                 .join("");
 
             const presetFlag = obj.presetPosition && obj.presetPosition !== 'center' ? ` -${obj.presetPosition}` : '';
-            return `changeFigure:${obj.path} -id=${obj.target} -transform=${transformJson}${extras}${presetFlag};`;
+            result.push(`changeFigure:${obj.path} -id=${obj.target} -transform=${transformJson}${extras}${presetFlag};`);
         }
-        if (obj.type=="changeBg")
-        {
+        if (obj.type == "changeBg") {
+            // 构建导出用的 transform 对象
+            const transform: any = {};
+            if (obj.transform.position !== undefined) {
+                transform.position = {
+                    x: obj.transform.position.x * scaleRatioX,
+                    y: obj.transform.position.y * scaleRatioY,
+                };
+            }
+            if (obj.transform.scale !== undefined) {
+                transform.scale = obj.transform.scale;
+            }
+            if (obj.transform.rotation !== undefined) {
+                transform.rotation = obj.transform.rotation;
+            }
+            // 添加所有其他属性（滤镜参数等）
+            for (const key in obj.transform) {
+                if (key !== 'position' && key !== 'scale' && key !== 'rotation') {
+                    transform[key] = obj.transform[key];
+                }
+            }
+            const roundedTransform = roundTransform(transform);
+            const transformJson = JSON.stringify(roundedTransform);
+            
             // extras：无值参数输出成 "-k"，有值参数输出 "-k=v"
             const extras = Object.entries(obj.extraParams || {})
+                .filter(([k]) => k !== "poseExtra") // 显式过滤掉 poseExtra
                 .map(([k, v]) => (v === "" || v === undefined) ? ` -${k}` : ` -${k}=${v}`)
                 .join("");
-            return `changeBg:${obj.path} -transform=${transformJson}${extras};`;
+            result.push(`changeBg:${obj.path} -transform=${transformJson}${extras};`);
         }
-
-        return "";
-    }).join("\n");
+    }
+    
+    return result.join("\n");
 }
 
 /**
@@ -201,16 +297,52 @@ export function buildAnimationSequence(transforms: TransformData[], transformInd
         }
     }
     
+    // 收集所有 figure 和背景的 ID（用于展开 stage-main）
+    const allFigureIds = new Set<string>();
+    for (const transform of transforms) {
+        if (transform.type === 'changeFigure' || transform.type === 'changeBg') {
+            if (transform.target) {
+                allFigureIds.add(transform.target);
+            }
+        }
+    }
+    
     // 按顺序提取所有 setTransform（保持原始顺序）
     // 使用深拷贝确保每个 transform 对象都是独立的
     const allSetTransforms: TransformData[] = [];
     const allSetTransformsOriginalIndex: number[] = []; // 记录每个 setTransform 在 transforms 中的原始索引
+    
+    // 首先，找到每个 target 的最后一个 changeFigure/changeBg 的索引
+    const targetToLastChangeIndex = new Map<string, number>();
+    for (let i = 0; i < transforms.length; i++) {
+        const t = transforms[i];
+        if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target) {
+            targetToLastChangeIndex.set(t.target, i);
+        }
+    }
+    
+    // 找到每个 target 的最后一个 changeFigure/changeBg，用于计算叠加后的位置
+    const targetToChangeFigure = new Map<string, TransformData>();
+    for (let i = transforms.length - 1; i >= 0; i--) {
+        const t = transforms[i];
+        if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target && !targetToChangeFigure.has(t.target)) {
+            targetToChangeFigure.set(t.target, t);
+        }
+    }
+    
     for (let i = 0; i < transforms.length; i++) {
         const transform = transforms[i];
         if (transform.type === 'setTransform') {
-            // 深拷贝 transform 对象，确保每个 setTransform 都有独立的 transform 对象
-            allSetTransforms.push(JSON.parse(JSON.stringify(transform)));
-            allSetTransformsOriginalIndex.push(i); // 记录原始索引
+            // 如果 target 是 stage-main，直接添加为容器层动画，不展开
+            if (transform.target === "stage-main") {
+                // 直接添加 stage-main 的 setTransform，不展开
+                allSetTransforms.push(JSON.parse(JSON.stringify(transform)));
+                allSetTransformsOriginalIndex.push(i); // 记录原始索引
+            } else {
+                // 深拷贝 transform 对象，确保每个 setTransform 都有独立的 transform 对象
+                allSetTransforms.push(JSON.parse(JSON.stringify(transform)));
+                allSetTransformsOriginalIndex.push(i); // 记录原始索引
+            }
         }
     }
     
@@ -238,6 +370,18 @@ export function buildAnimationSequence(transforms: TransformData[], transformInd
             console.log(`🎬 初始化 target=${figureID} 的起始状态: position=${JSON.stringify(initialState.position)}, scale=${JSON.stringify(initialState.scale)}`);
         }
     });
+    
+    // 初始化 stage-main 的起始状态（如果存在）
+    // stage-main 的起始状态应该是 { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 }, rotation: 0 }
+    const hasStageMain = allSetTransforms.some(st => st.target === 'stage-main');
+    if (hasStageMain && !targetStates.has('stage-main')) {
+        targetStates.set('stage-main', {
+            position: { x: 0, y: 0 },
+            scale: { x: 1, y: 1 },
+            rotation: 0
+        });
+        console.log(`🎬 初始化 stage-main 的起始状态: position={x:0, y:0}, scale={x:1, y:1}, rotation=0`);
+    }
     
     // 首先，找出所有通过 next 连接的连续序列，并找出每个 target 在序列中的最后一个 setTransform
     // Map<target, 该 target 在每个连续序列中最后一个 setTransform 的索引数组>
@@ -558,6 +702,16 @@ export function applyFigureIDSystem(transforms: TransformData[]): TransformData[
     const figureStates = new Map<string, TransformData>();
     const result: TransformData[] = [];
     
+    // 收集所有 figure 和背景的 ID（用于展开 stage-main）
+    const allFigureIds = new Set<string>();
+    for (const transform of transforms) {
+        if (transform.type === 'changeFigure' || transform.type === 'changeBg') {
+            if (transform.target) {
+                allFigureIds.add(transform.target);
+            }
+        }
+    }
+    
     // 第一次遍历：处理所有 figure 相关的命令，计算最终状态（用于渲染）
     for (const transform of transforms) {
         // rawText 和 changeBg 跳过，后面再处理
@@ -610,6 +764,7 @@ export function applyFigureIDSystem(transforms: TransformData[]): TransformData[
             result.push(transform);
         } else if (transform.type === 'setTransform') {
             // setTransform：保留为独立命令，不合并
+            // 注意：stage-main 保持原始格式，不在解析时展开，只在渲染时展开
             result.push(transform);
         } else {
             // changeFigure：保持原始状态，不合并 setTransform 的 transform
@@ -718,12 +873,16 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
             }
 
             // 更新 target 的状态（使用深拷贝，避免引用问题）
-            targetStates.set(target, JSON.parse(JSON.stringify(transform)));
+            // 注意：对于 stage-main，我们不更新 targetStates，因为它在执行时才会展开
+            if (target !== "stage-main") {
+                targetStates.set(target, JSON.parse(JSON.stringify(transform)));
+            }
 
             // 解析 next 参数：如果存在 -next 参数（无论是否有值），next 为 true
             const next = "next" in params;
 
             // 返回时也使用深拷贝，确保每个 setTransform 都有独立的 transform 对象
+            // 对于 stage-main，保持原始格式，在执行时展开
             return {
                 type: "setTransform",
                 target: target,
@@ -767,6 +926,12 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
                     } catch {
                         console.warn("❌ 解析 transform JSON 失败:", v);
                     }
+                } else if (k === "poseExtra") {
+                    // 如果有 poseExtra，且没有 pose，则将其视为 pose
+                    if (!params.pose) {
+                        params.pose = v || "";
+                    }
+                    continue;
                 } else if (k && v) {
                     params[k] = v;
                 } else if (k && !v) {
@@ -778,6 +943,19 @@ export function parseScript(script: string, scaleX: number, scaleY: number): Tra
 
             const target = params.id || "unknown";
             
+            // 特殊处理 WebGAL Mano:
+            if (path.includes('type=webgal_mano')) {
+                if (params.pose) {
+                    let p = params.pose.trim();
+                    if (p.startsWith('{') && p.endsWith('}')) {
+                        params.pose = p.slice(1, -1);
+                    }
+                } else {
+                    // 默认值也去掉花括号，显示为 Default,Angle01/Facial/Cheeks-
+                    params.pose = "Default,Angle01/Facial/Cheeks-";
+                }
+            }
+
             // 更新 target 的状态为 changeFigure 的 transform
             targetStates.set(target, transform);
 

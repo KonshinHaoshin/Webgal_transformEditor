@@ -6,11 +6,11 @@ import { parseScript, applyFigureIDSystem } from './utils/transformParser';
 export default function ScriptOutputWindow() {
   const [outputScriptLines, setOutputScriptLines] = useState<string[]>([]);
   const [transforms, setTransforms] = useState<TransformData[]>([]); // 用于读取，获取当前选中的 target
-  const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]); // 用于读取，获取当前选中的索引
   const [scaleX, setScaleX] = useState(1);
   const [scaleY, setScaleY] = useState(1);
   const [, setSelectedGameFolder] = useState<string | null>(null); // 只用于设置，不读取
   const [breakpoints, setBreakpoints] = useState<Set<number>>(new Set()); // 断点行索引集合
+  const [exportDuration, setExportDuration] = useState(500); // 导出时的默认 duration
   const isReceivingUpdateRef = useRef(false); // 标记是否正在接收来自主窗口的更新
   const isInitializedRef = useRef(false); // 标记是否已经初始化（接收过第一次数据）
 
@@ -44,6 +44,7 @@ export default function ScriptOutputWindow() {
           setTransforms(event.payload.transforms || []);
           setScaleX(event.payload.scaleX || 1);
           setScaleY(event.payload.scaleY || 1);
+          setExportDuration(event.payload.exportDuration || 500);
           setSelectedGameFolder(event.payload.selectedGameFolder || null);
           isInitializedRef.current = true; // 标记已初始化
           // 重置标记
@@ -55,18 +56,8 @@ export default function ScriptOutputWindow() {
         }
       });
 
-      // 监听选中索引更新
-      const unlistenSelected = await listen<{
-        selectedIndexes: number[];
-      }>('script-output:selected-indexes-updated', (event) => {
-        if (event.payload && Array.isArray(event.payload.selectedIndexes)) {
-          setSelectedIndexes(event.payload.selectedIndexes);
-        }
-      });
-
       return () => {
         unlistenUpdate();
-        unlistenSelected();
       };
     };
 
@@ -190,83 +181,41 @@ export default function ScriptOutputWindow() {
     handleOutputScriptChange(newLines.join('\n'));
   };
 
-  // 获取下一个 figure 名称
-  const getNextFigureName = (): string => {
-    let max = 0;
-    for (const t of transforms) {
-      const m = /^figure(\d+)$/.exec(t.target);
-      if (m) max = Math.max(max, parseInt(m[1], 10));
-    }
-    return `figure${max + 1}`;
-  };
 
-  // 获取当前选中的 target（如果有）
-  const getSelectedTarget = (): string | null => {
-    if (selectedIndexes.length > 0) {
-      const firstSelected = transforms[selectedIndexes[0]];
-      if (firstSelected && firstSelected.target) {
-        return firstSelected.target;
-      }
-    }
-    return null;
-  };
-
-  // 添加 changeFigure
-  const handleAddChangeFigure = () => {
-    const selectedTarget = getSelectedTarget();
-    const target = selectedTarget || getNextFigureName();
+  // 添加 stage-main setTransform
+  const handleAddStageMain = () => {
+    // 查找第一个 changeFigure 或 setTransform（用于继承 transform 值）
+    let inheritedTransform: any = {};
     
-    // 查找该 target 的最后一个 changeFigure（如果有），用于继承路径和 transform
-    let path = '';
-    let transform = { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } };
-    let presetPosition: 'left' | 'center' | 'right' = 'center';
-    
-    for (let i = transforms.length - 1; i >= 0; i--) {
+    // 从前往后查找第一个 changeFigure 或 setTransform
+    for (let i = 0; i < transforms.length; i++) {
       const t = transforms[i];
-      if (t.type === 'changeFigure' && t.target === target) {
-        path = t.path || '';
-        transform = t.transform || transform;
-        presetPosition = t.presetPosition || 'center';
-        break;
+      if ((t.type === 'changeFigure' || t.type === 'setTransform') && t.target !== 'bg-main') {
+        // 找到第一个，继承其 transform 值
+        if (t.transform) {
+          if (t.transform.position) {
+            inheritedTransform.position = { ...t.transform.position };
+          }
+          if (t.transform.scale) {
+            inheritedTransform.scale = { ...t.transform.scale };
+          }
+          if (t.transform.rotation !== undefined) {
+            inheritedTransform.rotation = t.transform.rotation;
+          }
+        }
+        break; // 找到第一个，退出循环
       }
     }
     
-    // 如果没有找到路径，使用默认值
-    if (!path) {
-      path = 'path/to/figure.png'; // 默认路径，用户可以编辑
+    // 如果没有找到任何值，使用默认值
+    if (Object.keys(inheritedTransform).length === 0) {
+      inheritedTransform.position = { x: 0, y: 0 };
+      inheritedTransform.scale = { x: 1, y: 1 };
+      inheritedTransform.rotation = 0;
     }
     
-    const transformJson = JSON.stringify(transform);
-    const presetFlag = presetPosition && presetPosition !== 'center' ? ` -${presetPosition}` : '';
-    const newLine = `changeFigure:${path} -id=${target} -transform=${transformJson}${presetFlag};`;
-    
-    const newLines = [...outputScriptLines, newLine];
-    setOutputScriptLines(newLines);
-    handleOutputScriptChange(newLines.join('\n'));
-  };
-
-  // 添加 changeBg
-  const handleAddChangeBg = () => {
-    // 查找最后一个 changeBg（如果有），用于继承路径和 transform
-    let path = '';
-    let transform = { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 } };
-    
-    for (let i = transforms.length - 1; i >= 0; i--) {
-      const t = transforms[i];
-      if (t.type === 'changeBg') {
-        path = t.path || '';
-        transform = t.transform || transform;
-        break;
-      }
-    }
-    
-    // 如果没有找到路径，使用默认值
-    if (!path) {
-      path = 'path/to/background.png'; // 默认路径，用户可以编辑
-    }
-    
-    const transformJson = JSON.stringify(transform);
-    const newLine = `changeBg:${path} -transform=${transformJson};`;
+    const transformJson = JSON.stringify(inheritedTransform);
+    const newLine = `setTransform:${transformJson} -target=stage-main -duration=${exportDuration} -next;`;
     
     const newLines = [...outputScriptLines, newLine];
     setOutputScriptLines(newLines);
@@ -338,36 +287,20 @@ export default function ScriptOutputWindow() {
             + 空白语句
           </button>
           <button
-            onClick={handleAddChangeFigure}
+            onClick={handleAddStageMain}
             style={{
               padding: '8px 16px',
               fontSize: '14px',
-              backgroundColor: '#17a2b8',
+              backgroundColor: '#6f42c1',
               color: '#fff',
               border: 'none',
               borderRadius: '4px',
               cursor: 'pointer',
               fontWeight: 'bold'
             }}
-            title="添加 changeFigure 语句（如果选中了 target 则使用该 target，否则创建新的 figure）"
+            title="添加 setTransform -target=stage-main 语句（继承第一个 changeFigure 或 setTransform 的 transform 值）"
           >
-            + changeFigure
-          </button>
-          <button
-            onClick={handleAddChangeBg}
-            style={{
-              padding: '8px 16px',
-              fontSize: '14px',
-              backgroundColor: '#ffc107',
-              color: '#000',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontWeight: 'bold'
-            }}
-            title="添加 changeBg 语句"
-          >
-            + changeBg
+            + stage-main
           </button>
           <button
             onClick={handleCopyScript}
