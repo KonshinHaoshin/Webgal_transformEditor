@@ -72,6 +72,7 @@ export default function CanvasRenderer(props: Props) {
     const appRef = useRef<PIXI.Application | null>(null);
     const spriteMap = useRef<Record<string, PixiContainer>>({});
     const graphicsMapRef = useRef<Record<string, PIXI.Graphics>>({});
+    const nameTextMapRef = useRef<Record<string, PIXI.Text>>({}); // 新增：用于跟踪角色名文本
     const overlayRef = useRef<{ container: PIXI.Container; filter: OverlayBlendFilter } | null>(null);
     const stageContainerRef = useRef<PIXI.Container | null>(null); // 保存 stage-main 容器的引用
     const sceneCenterRef = useRef<{ x: number; y: number } | null>(null); // 保存场景中心点
@@ -678,6 +679,8 @@ export default function CanvasRenderer(props: Props) {
 
         Object.values(graphicsMapRef.current).forEach(g => g.destroy());
         graphicsMapRef.current = {};
+        Object.values(nameTextMapRef.current).forEach(t => t.destroy());
+        nameTextMapRef.current = {};
         spriteMap.current = {};
 
         // 收集所有 figure 和背景的 ID（用于展开 stage-main）
@@ -1023,6 +1026,7 @@ export default function CanvasRenderer(props: Props) {
             (container as any)._baseX = baseX;
             (container as any)._baseY = baseY;
             (container as any)._isBg = isBg;
+            (container as any)._drawH = drawH; // 保存 drawH 供文本定位使用
 
             const px = (transformToUse.position?.x ?? 0) * scaleX;
             const py = (transformToUse.position?.y ?? 0) * scaleY;
@@ -1050,8 +1054,9 @@ export default function CanvasRenderer(props: Props) {
                     fontFamily: "Arial",
                 });
                 nameText.anchor.set(0.5);
-                nameText.position.set(container.x, container.y - drawH / 2 - 10);
-                stage.addChild(nameText);
+                // 相对于容器中心向上偏移
+                nameText.position.set(0, -drawH / 2 - 40);
+                container.addChild(nameText);
             }
 
             // 🧠 注册交互（只有启用的target才能交互）
@@ -1485,18 +1490,14 @@ export default function CanvasRenderer(props: Props) {
             }
 
             // 📏 蓝色边框（可选显示）
-            // 如果启用了显示蓝色框选框，则所有模型都显示蓝色框
             if (showSelectionBox) {
                 const g = new PIXI.Graphics();
-                // 选中的对象使用更粗的线条和更亮的颜色，未选中的对象使用较细的线条
                 const isSelected = selectedIndexes.includes(index);
-                g.lineStyle(isSelected ? 3 : 2, isSelected ? 0x0000ff : 0x4169e1); // 选中：蓝色粗线，未选中：较淡蓝色细线
+                g.lineStyle(isSelected ? 3 : 2, isSelected ? 0x0000ff : 0x4169e1);
+                // 在容器本地坐标系 (0,0) 处绘制，自动跟随容器缩放
                 g.drawRect(-drawW / 2, -drawH / 2, drawW, drawH);
                 g.endFill();
-                g.position.set(container.x, container.y);
-                g.rotation = container.rotation;
-                g.pivot.set(0, 0);
-                stage.addChild(g);
+                container.addChild(g);
                 graphicsMapRef.current[t.target] = g;
             }
 
@@ -1908,6 +1909,18 @@ export default function CanvasRenderer(props: Props) {
                     if ((container as any)[key] !== undefined) {
                         (container as any)[key] = transform[key];
                     }
+                }
+
+                // 🔄 同步更新蓝色边框和角色名位置
+                const g = graphicsMapRef.current[target];
+                if (g) {
+                    g.position.set(container.x, container.y);
+                    g.rotation = container.rotation;
+                    g.scale.set(container.scale.x, container.scale.y);
+                }
+                const nt = nameTextMapRef.current[target];
+                if (nt) {
+                    nt.position.set(container.x, container.y - (container as any)._drawH / 2 - 10);
                 }
             });
             
