@@ -24,7 +24,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-log = "2.6.0"
 tauri-plugin-fs = "2"
-tauri-plugin-dialog = "2"
+tauri-plugin-dialog = "2.6.0"
 tiny_http = "0.12"
 tokio = { version = "1", features = ["full"] }
 urlencoding = "2.1"

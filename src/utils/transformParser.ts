@@ -181,7 +181,7 @@ export function exportScript(
             const roundedTransform = roundTransform(transform);
             const transformJson = JSON.stringify(roundedTransform);
 
-            const isMano = obj.path.includes('type=webgal_mano');
+            const isMano = obj.path?.includes('type=webgal_mano');
             // extras：无值参数输出成 "-k"，有值参数输出 "-k=v"
             const extras = Object.entries(obj.extraParams || {})
                 .filter(([k]) => k !== "poseExtra") // 显式过滤掉 poseExtra

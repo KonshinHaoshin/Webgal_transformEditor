@@ -33,7 +33,8 @@ interface Props {
     breakpoints?: Set<number>; // 断点行索引集合
     fullOutputScriptLines?: string[]; // 完整的输出脚本行（不受断点影响）
     outputScriptLines?: string[]; // 当前的输出脚本行
-    mygo3Mode?: boolean; // MyGO!!!!! 3.0 模式
+    // mygo3Mode?: boolean; // MyGO!!!!! 3.0 模式 (已弃用)
+    positioningType?: 'M_2_3' | 'M_2_4' | 'M_3_0_0' | 'M_3_1_0'; // 立绘定位系统
 }
 
 export default function CanvasRenderer(props: Props) {
@@ -52,7 +53,8 @@ export default function CanvasRenderer(props: Props) {
         showTargetId = true,
         animationStateRef,
         breakpoints = new Set(),
-        mygo3Mode = false
+        // mygo3Mode = false,
+        positioningType = 'M_2_4'
         // fullOutputScriptLines 和 outputScriptLines 暂时未使用，但保留在 Props 接口中以便将来使用
     } = props;
     
@@ -525,8 +527,11 @@ export default function CanvasRenderer(props: Props) {
                                 if (!stageMainSetTransform.transform.scale) {
                                     stageMainSetTransform.transform.scale = { x: 1, y: 1 };
                                 }
-                                stageMainSetTransform.transform.scale.x = newScale;
-                                stageMainSetTransform.transform.scale.y = newScale;
+                                const s = stageMainSetTransform.transform.scale;
+                                if (s) {
+                                    s.x = newScale;
+                                    s.y = newScale;
+                                }
                                 return copy;
                             });
                             break;
@@ -547,8 +552,11 @@ export default function CanvasRenderer(props: Props) {
                                         if (!copy[selectedIndex].transform.scale) {
                                             copy[selectedIndex].transform.scale = { x: 1, y: 1 };
                                         }
-                                        copy[selectedIndex].transform.scale.x = newScale;
-                                        copy[selectedIndex].transform.scale.y = newScale;
+                                        const s = copy[selectedIndex].transform.scale;
+                                        if (s) {
+                                            s.x = newScale;
+                                            s.y = newScale;
+                                        }
 
                                         // 如果选中的是 changeFigure/changeBg，也需要更新对应的 setTransform（如果有）
                                         if ((selectedObj.type === 'changeFigure' || selectedObj.type === 'changeBg')) {
@@ -558,8 +566,11 @@ export default function CanvasRenderer(props: Props) {
                                                 if (!copy[setTransformIdx].transform.scale) {
                                                     copy[setTransformIdx].transform.scale = { x: 1, y: 1 };
                                                 }
-                                                copy[setTransformIdx].transform.scale.x = newScale;
-                                                copy[setTransformIdx].transform.scale.y = newScale;
+                                                const ss = copy[setTransformIdx].transform.scale;
+                                                if (ss) {
+                                                    ss.x = newScale;
+                                                    ss.y = newScale;
+                                                }
                                             }
                                         }
                                     }
@@ -589,8 +600,11 @@ export default function CanvasRenderer(props: Props) {
                                         if (!copy[setTransformIdx].transform.scale) {
                                             copy[setTransformIdx].transform.scale = { x: 1, y: 1 };
                                         }
-                                        copy[setTransformIdx].transform.scale.x = newScale;
-                                        copy[setTransformIdx].transform.scale.y = newScale;
+                                        const ss = copy[setTransformIdx].transform.scale;
+                                        if (ss) {
+                                            ss.x = newScale;
+                                            ss.y = newScale;
+                                        }
                                     }
                                 }
                                 return copy;
@@ -611,18 +625,21 @@ export default function CanvasRenderer(props: Props) {
 
                     // 如果存在 stage-main 的 setTransform，并且缩放的是立绘或背景，则直接更新 stage-main
                     if (stageMainSetTransformIdx !== -1 && isScalingFigureOrBg) {
-                        setTransforms(prev => {
-                            const copy = [...prev];
-                            const stageMainSetTransform = copy[stageMainSetTransformIdx];
-                            const currentScale = stageMainSetTransform.transform.scale?.x || 1;
-                            const newScale = Math.max(0.1, currentScale + delta);
-                            if (!stageMainSetTransform.transform.scale) {
-                                stageMainSetTransform.transform.scale = { x: 1, y: 1 };
-                            }
-                            stageMainSetTransform.transform.scale.x = newScale;
-                            stageMainSetTransform.transform.scale.y = newScale;
-                            return copy;
-                        });
+                            setTransforms(prev => {
+                                const copy = [...prev];
+                                const stageMainSetTransform = copy[stageMainSetTransformIdx];
+                                const currentScale = stageMainSetTransform.transform.scale?.x || 1;
+                                const newScale = Math.max(0.1, currentScale + delta);
+                                if (!stageMainSetTransform.transform.scale) {
+                                    stageMainSetTransform.transform.scale = { x: 1, y: 1 };
+                                }
+                                const s = stageMainSetTransform.transform.scale;
+                                if (s) {
+                                    s.x = newScale;
+                                    s.y = newScale;
+                                }
+                                return copy;
+                            });
                     } else {
                         setTransforms(prev => {
                             const copy = [...prev];
@@ -635,8 +652,11 @@ export default function CanvasRenderer(props: Props) {
                                     if (!copy[selectedIndex].transform.scale) {
                                         copy[selectedIndex].transform.scale = { x: 1, y: 1 };
                                     }
-                                    copy[selectedIndex].transform.scale.x = newScale;
-                                    copy[selectedIndex].transform.scale.y = newScale;
+                                    const s = copy[selectedIndex].transform.scale;
+                                    if (s) {
+                                        s.x = newScale;
+                                        s.y = newScale;
+                                    }
 
                                     // 如果选中的是 changeFigure/changeBg，也需要更新对应的 setTransform（如果有）
                                     if ((selectedObj.type === 'changeFigure' || selectedObj.type === 'changeBg')) {
@@ -646,8 +666,11 @@ export default function CanvasRenderer(props: Props) {
                                             if (!copy[setTransformIdx].transform.scale) {
                                                 copy[setTransformIdx].transform.scale = { x: 1, y: 1 };
                                             }
-                                            copy[setTransformIdx].transform.scale.x = newScale;
-                                            copy[setTransformIdx].transform.scale.y = newScale;
+                                            const ss = copy[setTransformIdx].transform.scale;
+                                            if (ss) {
+                                                ss.x = newScale;
+                                                ss.y = newScale;
+                                            }
                                         }
                                     }
                                 }
@@ -952,45 +975,89 @@ export default function CanvasRenderer(props: Props) {
                 const imgW = imgWidth || 1;
                 const imgH = imgHeight || 1;
 
-                const pathLower = (t.path || "").toLowerCase();
-                const isMygoLive2D =
-                    mygo3Mode &&
-                    pathLower.endsWith(".json");
+                const isLive2D = figure?.sourceType === 'live2d';
+                const isJsonl = figure?.sourceType === 'jsonl';
+                
+                // 确定该立绘实际使用的定位系统
+                let actualPositioning = positioningType;
+                
+                // 非 Live2D 立绘一律使用 4.5.13 定位 ('M_2_4')
+                if (!isLive2D && !isJsonl && figure?.sourceType !== 'webgal_mano') {
+                    actualPositioning = 'M_2_4';
+                }
+                
+                // JSONL 立绘在 MyGO 3.0.0 仍然使用 4.5.13 定位
+                if (isJsonl && actualPositioning === 'M_3_0_0') {
+                    actualPositioning = 'M_2_4';
+                }
 
                 let fitScale = Math.min(canvasWidth / imgW, canvasHeight / imgH);
 
-                if (isMygoLive2D) {
-                    fitScale *= 1.25;
+                // 根据定位系统调整缩放比例
+                switch (actualPositioning) {
+                    case 'M_2_3':
+                        fitScale *= 1.5;
+                        break;
+                    case 'M_3_0_0':
+                    case 'M_3_1_0':
+                        fitScale *= 1.25;
+                        break;
                 }
                 
                 // drawW/drawH 只使用 fitScale，用户缩放通过 container.scale 应用
                 drawW = imgW * fitScale;
                 drawH = imgH * fitScale;
 
-                // 垂直基线（与 addFigure 一致）
-                // 先以画布中线为基准，如果适配后的高度没有铺满，则把基线下移 (stageH - targetH)/2
+                // 垂直基线
+                // 默认居中
                 baseY = canvasHeight / 2;
-                const targetHNoUser = imgH * fitScale; // 不含用户缩放的原始适配高度（对基线判断用）
-                if (targetHNoUser < canvasHeight) {
+
+                // 根据定位系统调整垂直基线
+                // 如果适配后的高度没有铺满且不是 M_2_3，则把基线下移 (stageH - targetH)/2 (立绘贴底)
+                const targetHNoUser = imgH * fitScale; 
+                if (targetHNoUser < canvasHeight && actualPositioning !== 'M_2_3') {
                     baseY = canvasHeight / 2 + (canvasHeight - targetHNoUser) / 2;
                 }
 
-                // 水平预设位（使用最后一个 changeFigure 的预设位置）
-                const preset = getPreset(lastChangeFigure); // 'left' | 'center' | 'right'
-                const targetWNoUser = imgW * fitScale; // 不含用户缩放的原始适配宽度（基线用）
+                // 添加定位系统带来的垂直偏移量
+                let verticalOffset = 0;
+                switch (actualPositioning) {
+                    case 'M_2_3':
+                        verticalOffset = canvasHeight / 1.2 - canvasHeight / 2;
+                        break;
+                    case 'M_3_0_0':
+                    case 'M_3_1_0':
+                        verticalOffset = canvasHeight / 1.8 - canvasHeight / 2;
+                        break;
+                }
+                baseY += verticalOffset;
 
-                if (isMygoLive2D) {
-                    if (preset === 'left') {
-                        baseX = 850;
-                    } else if (preset === 'right') {
-                        baseX = 1710;
-                    } else {
-                        baseX = centerX;
+                // 水平预设位
+                const preset = getPreset(lastChangeFigure); // 'left' | 'center' | 'right'
+                const targetWNoUser = imgW * fitScale; 
+
+                if (preset === 'center') {
+                    baseX = canvasWidth / 2;
+                } else if (preset === 'left') {
+                    switch (actualPositioning) {
+                        case 'M_3_0_0':
+                        case 'M_3_1_0':
+                            baseX = canvasWidth / 2 - 430;
+                            break;
+                        default:
+                            baseX = targetWNoUser / 2;
+                            break;
                     }
-                } else {
-                    if (preset === 'center') baseX = canvasWidth / 2;
-                    if (preset === 'left') baseX = targetWNoUser / 2;
-                    if (preset === 'right') baseX = canvasWidth - targetWNoUser / 2;
+                } else if (preset === 'right') {
+                    switch (actualPositioning) {
+                        case 'M_3_0_0':
+                        case 'M_3_1_0':
+                            baseX = canvasWidth / 2 + 430;
+                            break;
+                        default:
+                            baseX = canvasWidth - targetWNoUser / 2;
+                            break;
+                    }
                 }
             }
 
@@ -1418,11 +1485,14 @@ export default function CanvasRenderer(props: Props) {
                                     if (!stageMainSetTransform.transform.position) {
                                         stageMainSetTransform.transform.position = { x: 0, y: 0 };
                                     }
-                                    if (!lockXRef.current) {
-                                        stageMainSetTransform.transform.position.x = initialPos.x + deltaX / scaleX;
-                                    }
-                                    if (!lockYRef.current) {
-                                        stageMainSetTransform.transform.position.y = initialPos.y + deltaY / scaleY;
+                                    const p = stageMainSetTransform.transform.position;
+                                    if (p) {
+                                        if (!lockXRef.current) {
+                                            p.x = initialPos.x + deltaX / scaleX;
+                                        }
+                                        if (!lockYRef.current) {
+                                            p.y = initialPos.y + deltaY / scaleY;
+                                        }
                                     }
                                     
                                     // stage-main 的 transform 会在渲染时自动应用到所有立绘和背景，无需手动创建其他 setTransform
@@ -1445,11 +1515,14 @@ export default function CanvasRenderer(props: Props) {
                                                     if (!copy[setTransformIdx].transform.position) {
                                                         copy[setTransformIdx].transform.position = { x: 0, y: 0 };
                                                     }
-                                                    if (!lockXRef.current) {
-                                                        copy[setTransformIdx].transform.position.x = initialPos.x + deltaX / scaleX;
-                                                    }
-                                                    if (!lockYRef.current) {
-                                                        copy[setTransformIdx].transform.position.y = initialPos.y + deltaY / scaleY;
+                                                    const p = copy[setTransformIdx].transform.position;
+                                                    if (p) {
+                                                        if (!lockXRef.current) {
+                                                            p.x = initialPos.x + deltaX / scaleX;
+                                                        }
+                                                        if (!lockYRef.current) {
+                                                            p.y = initialPos.y + deltaY / scaleY;
+                                                        }
                                                     }
                                                 });
                                             } else {
@@ -1457,11 +1530,14 @@ export default function CanvasRenderer(props: Props) {
                                                 if (!copy[idx].transform.position) {
                                                     copy[idx].transform.position = { x: 0, y: 0 };
                                                 }
-                                                if (!lockXRef.current) {
-                                                    copy[idx].transform.position.x = initialPos.x + deltaX / scaleX;
-                                                }
-                                                if (!lockYRef.current) {
-                                                    copy[idx].transform.position.y = initialPos.y + deltaY / scaleY;
+                                                const p = copy[idx].transform.position;
+                                                if (p) {
+                                                    if (!lockXRef.current) {
+                                                        p.x = initialPos.x + deltaX / scaleX;
+                                                    }
+                                                    if (!lockYRef.current) {
+                                                        p.y = initialPos.y + deltaY / scaleY;
+                                                    }
                                                 }
                                             }
                                         }
@@ -1721,7 +1797,7 @@ export default function CanvasRenderer(props: Props) {
         if (existingGuideLines) {
             stage.addChild(existingGuideLines);
         }
-    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY, overlayMode, canvasWidth, canvasHeight, enabledTargets, enabledTargetsArray, showSelectionBox, showTargetId, mygo3Mode]);
+    }, [transforms, modelImg, bgImg, selectedIndexes, lockX, lockY, overlayMode, canvasWidth, canvasHeight, enabledTargets, enabledTargetsArray, showSelectionBox, showTargetId]);
 
     // 独立的辅助线渲染逻辑
     useEffect(() => {

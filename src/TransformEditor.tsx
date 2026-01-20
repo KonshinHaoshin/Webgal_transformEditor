@@ -62,13 +62,17 @@ export default function TransformEditor() {
   const [showSelectionBox, setShowSelectionBox] = useState(true);
   // 是否显示角色ID
   const [showTargetId, setShowTargetId] = useState(true);
-  // MyGO!!!!! 3.0 模式
-  const [mygo3Mode, setMygo3Mode] = useState(false);
+  // MyGO!!!!! 3.0 模式 (已弃用，由定位系统替代)
+  // const [mygo3Mode, setMygo3Mode] = useState(false);
   
   // 画幅比选择（高度固定为1440）
   type AspectRatio = '16:9' | '21:9' | '1.85:1' | '16:10' | '4:3' | 'custom';
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9');
   const [customWidth, setCustomWidth] = useState<number>(2560);
+
+  // 立绘定位系统
+  type PositioningType = 'M_2_3' | 'M_2_4' | 'M_3_0_0' | 'M_3_1_0';
+  const [positioningType, setPositioningType] = useState<PositioningType>('M_2_4');
   
   // 根据画幅比和固定高度计算宽度
   const calculateWidth = (ratio: AspectRatio, custom: number = 2560): number => {
@@ -1521,6 +1525,36 @@ export default function TransformEditor() {
           <span style={{ fontSize: "14px", color: "#666", whiteSpace: "nowrap" }}>
             当前画幅：{canvasWidth} × {canvasHeight}
           </span>
+
+          <div style={{ marginLeft: "auto", display: "flex", gap: "12px", alignItems: "center" }}>
+            <label style={{ 
+              fontSize: "14px", 
+              fontWeight: "600", 
+              color: "#374151",
+              whiteSpace: "nowrap"
+            }}>
+              定位系统：
+            </label>
+            <select
+              value={positioningType}
+              onChange={(e) => setPositioningType(e.target.value as PositioningType)}
+              aria-label="选择定位系统"
+              title="选择定位系统"
+              style={{
+                padding: "6px 12px",
+                fontSize: "14px",
+                border: "1px solid #d1d5db",
+                borderRadius: "4px",
+                backgroundColor: "#ffffff",
+                cursor: "pointer"
+              }}
+            >
+              <option value="M_2_3">4.4.12 (M_2_3)</option>
+              <option value="M_2_4">4.5.13 (M_2_4)</option>
+              <option value="M_3_0_0">MyGO 3.0.0 (M_3_0_0)</option>
+              <option value="M_3_1_0">MyGO 3.1.0 (M_3_1_0)</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -2001,6 +2035,7 @@ export default function TransformEditor() {
             </span>
           </label>
         
+{/* 
         <label style={{ display: "flex", alignItems: "center" }}>
           <input
             type="checkbox"
@@ -2012,6 +2047,7 @@ export default function TransformEditor() {
             MyGO!!!!! 3.0 模式
           </span>
         </label>
+        */}
         </div>
         
         {/* 立绘和背景启用列表 */}
@@ -2253,10 +2289,11 @@ export default function TransformEditor() {
           enabledTargetsArray={Array.from(enabledTargets)}
           showSelectionBox={showSelectionBox}
           showTargetId={showTargetId}
-          mygo3Mode={mygo3Mode}
+          // mygo3Mode={mygo3Mode}
           breakpoints={breakpoints}
           fullOutputScriptLines={fullOutputScriptLinesRef.current}
           outputScriptLines={outputScriptLines}
+          positioningType={positioningType}
         />
       </div>
 
