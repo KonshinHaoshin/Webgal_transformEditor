@@ -166,6 +166,90 @@ export default function TransformEditor() {
     }, 500);
   };
 
+  // ⌨️ 方向键移动逻辑
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 如果正在输入，不处理方向键
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) {
+        return;
+      }
+
+      if (selectedIndexes.length === 0) return;
+
+      const step = e.shiftKey ? 10 : 1; // 按住 Shift 键移动 10 像素
+      let dx = 0;
+      let dy = 0;
+
+      switch (e.key) {
+        case "ArrowUp":
+          dy = -step;
+          break;
+        case "ArrowDown":
+          dy = step;
+          break;
+        case "ArrowLeft":
+          dx = -step;
+          break;
+        case "ArrowRight":
+          dx = step;
+          break;
+        default:
+          return;
+      }
+
+      e.preventDefault();
+
+      setTransforms((prev) => {
+        const copy = [...prev];
+        const hasBreakpoint = (breakpoints as any).size > 0;
+
+        selectedIndexes.forEach((idx) => {
+          const t = copy[idx];
+          if (!t) return;
+
+          // 找到该 target 在断点之前的所有 setTransform（如果有断点）
+          // 或者只找到最后一个 setTransform（如果没有断点）
+          const targetToUpdate = t.target;
+          const setTransformIndices: number[] = [];
+          
+          if (hasBreakpoint) {
+            for (let i = 0; i < copy.length; i++) {
+              if (copy[i].type === "setTransform" && copy[i].target === targetToUpdate) {
+                setTransformIndices.push(i);
+              }
+            }
+          } else {
+            for (let i = copy.length - 1; i >= 0; i--) {
+              if (copy[i].type === "setTransform" && copy[i].target === targetToUpdate) {
+                setTransformIndices.push(i);
+                break;
+              }
+            }
+          }
+
+          if (setTransformIndices.length > 0) {
+            setTransformIndices.forEach((stIdx) => {
+              const st = copy[stIdx];
+              if (!st.transform.position) st.transform.position = { x: 0, y: 0 };
+              st.transform.position.x = (st.transform.position.x || 0) + dx;
+              st.transform.position.y = (st.transform.position.y || 0) + dy;
+            });
+          } else if (t.type === 'changeFigure' || t.type === 'changeBg') {
+            // 如果没有 setTransform，直接更新 changeFigure/changeBg
+            if (!t.transform.position) t.transform.position = { x: 0, y: 0 };
+            t.transform.position.x = (t.transform.position.x || 0) + dx;
+            t.transform.position.y = (t.transform.position.y || 0) + dy;
+          }
+        });
+
+        return copy;
+      });
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedIndexes, breakpoints]);
+
   const handleFileSelect = async (type: 'figure' | 'background', filename: string) => {
     // 获取文件路径（可能是 blob URL 或 HTTP URL）
     const fileUrl = await webgalFileManager[type === 'figure' ? 'getFigurePath' : 'getBackgroundPath'](filename);
@@ -1932,78 +2016,178 @@ export default function TransformEditor() {
         
         {/* 立绘和背景启用列表 */}
         <div style={{ marginTop: 20 }}>
-          <label style={{ display: "block", marginBottom: 10, fontWeight: "bold", color: "#333" }}>
-            启用立绘和背景：
-          </label>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <label style={{ fontWeight: "bold", color: "#333" }}>
+              启用交互对象：
+            </label>
+            <div style={{ display: "flex", gap: "8px" }}>
+              {(() => {
+                const allTargets = new Set<string>();
+                const targetToLastIndex = new Map<string, number>();
+                transforms.forEach((t, idx) => {
+                  if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target) {
+                    allTargets.add(t.target);
+                    targetToLastIndex.set(t.target, idx);
+                  }
+                });
+
+                const areAllEnabled = allTargets.size > 0 && Array.from(allTargets).every(t => enabledTargets.has(t));
+                const lastIndices = Array.from(targetToLastIndex.values());
+                const areAllSelected = lastIndices.length > 0 && lastIndices.every(idx => selectedIndexes.includes(idx));
+
+                return (
+                  <button 
+                    onClick={() => {
+                      if (!areAllEnabled) {
+                        // 第一次点击：全启用
+                        setEnabledTargets(new Set(allTargets));
+                      } else if (!areAllSelected) {
+                        // 第二次点击：全选中
+                        setSelectedIndexesFiltered(lastIndices);
+                      } else {
+                        // 第三次点击：取消全选和全启用
+                        setEnabledTargets(new Set());
+                        setSelectedIndexesFiltered([]);
+                      }
+                    }}
+                    style={{
+                      padding: "4px 12px",
+                      fontSize: "12px",
+                      cursor: "pointer",
+                      borderRadius: "4px",
+                      border: "none",
+                      background: areAllSelected ? "#ef4444" : (areAllEnabled ? "#2563eb" : "#3b82f6"),
+                      color: "#fff",
+                      fontWeight: "600",
+                      transition: "all 0.2s"
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = areAllSelected ? "#dc2626" : "#1d4ed8"}
+                    onMouseLeave={(e) => e.currentTarget.style.background = areAllSelected ? "#ef4444" : (areAllEnabled ? "#2563eb" : "#3b82f6")}
+                  >
+                    全选
+                  </button>
+                );
+              })()}
+              <button 
+                onClick={() => {
+                  setEnabledTargets(new Set());
+                  setSelectedIndexesFiltered([]);
+                }}
+                style={{
+                  padding: "4px 12px",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                  borderRadius: "4px",
+                  border: "none",
+                  background: "#64748b",
+                  color: "#fff",
+                  fontWeight: "600",
+                  transition: "all 0.2s"
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = "#475569"}
+                onMouseLeave={(e) => e.currentTarget.style.background = "#64748b"}
+              >
+                清空
+              </button>
+            </div>
+          </div>
           <div style={{ 
             display: "flex",
             flexWrap: "wrap",
-            gap: "12px",
+            gap: "8px",
             alignItems: "center",
-            border: "1px solid #ddd", 
-            borderRadius: "4px", 
-            padding: "10px",
-            backgroundColor: "#f9f9f9"
+            border: "1px solid #eee", 
+            borderRadius: "6px", 
+            padding: "12px",
+            backgroundColor: "#fff"
           }}>
             {(() => {
-              // 提取所有立绘和背景的 target
               const targets = new Set<string>();
               transforms.forEach(t => {
-                if (t.type === 'changeFigure' || t.type === 'changeBg') {
+                if ((t.type === 'changeFigure' || t.type === 'changeBg') && t.target) {
                   targets.add(t.target);
                 }
               });
               
               if (targets.size === 0) {
-                return <div style={{ color: "#999", fontStyle: "italic" }}>暂无立绘或背景</div>;
+                return <div style={{ color: "#999", fontStyle: "italic", fontSize: "13px" }}>暂无立绘或背景</div>;
               }
               
-              return Array.from(targets).map(target => {
-                const transform = transforms.find(t => 
-                  (t.type === 'changeFigure' || t.type === 'changeBg') && t.target === target
-                );
-                const isBg = transform?.type === 'changeBg' || target === 'bg-main';
+              return Array.from(targets).sort().map(target => {
+                const isEnabled = enabledTargets.has(target);
+                // 检查该 target 的任何一个实例是否被选中
+                const isSelected = selectedIndexes.some(idx => transforms[idx]?.target === target);
                 
+                const transform = transforms.find(t => t.target === target);
+                const isBg = target === 'bg-main' || transform?.type === 'changeBg';
+                
+                // 颜色逻辑：选中(红) > 启用(蓝/紫) > 禁用(灰)
+                let borderColor = "#e2e8f0";
+                let backgroundColor = "#fff";
+                let textColor = "#64748b";
+                let dotColor = "#cbd5e1";
+
+                if (isSelected) {
+                  borderColor = "#ef4444";
+                  backgroundColor = "#fef2f2";
+                  textColor = "#b91c1c";
+                  dotColor = "#ef4444";
+                } else if (isEnabled) {
+                  borderColor = isBg ? "#8b5cf6" : "#2563eb";
+                  backgroundColor = isBg ? "#f5f3ff" : "#eff6ff";
+                  textColor = isBg ? "#6d28d9" : "#1d4ed8";
+                  dotColor = isBg ? "#8b5cf6" : "#2563eb";
+                }
+
                 return (
-                  <label 
+                  <button 
                     key={target}
+                    onClick={() => {
+                      if (!isEnabled) {
+                        // 第一次点击：变蓝（启用）
+                        setEnabledTargets(new Set(enabledTargets).add(target));
+                      } else if (!isSelected) {
+                        // 第二次点击：变红（选中）
+                        // 找到该 target 的最后一个 changeFigure/changeBg 索引并选中
+                        const lastIdx = transforms.reduce((last, t, idx) => 
+                          (t.target === target && (t.type === 'changeFigure' || t.type === 'changeBg')) ? idx : last, -1
+                        );
+                        if (lastIdx !== -1) {
+                          setSelectedIndexesFiltered([lastIdx]);
+                        }
+                      } else {
+                        // 第三次点击：取消选中和启用
+                        const newEnabled = new Set(enabledTargets);
+                        newEnabled.delete(target);
+                        setEnabledTargets(newEnabled);
+                        setSelectedIndexesFiltered(prev => prev.filter(idx => transforms[idx]?.target !== target));
+                      }
+                    }}
                     style={{ 
-                      display: "flex", 
-                      alignItems: "center", 
+                      padding: "6px 12px",
+                      fontSize: "13px",
                       cursor: "pointer",
-                      userSelect: "none",
-                      whiteSpace: "nowrap"
+                      borderRadius: "20px",
+                      border: "1px solid",
+                      borderColor: borderColor,
+                      background: backgroundColor,
+                      color: textColor,
+                      fontWeight: (isEnabled || isSelected) ? "600" : "normal",
+                      transition: "all 0.2s",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      boxShadow: (isEnabled || isSelected) ? "0 2px 4px rgba(0,0,0,0.05)" : "none"
                     }}
                   >
-                    <input
-                      type="checkbox"
-                      checked={enabledTargets.has(target)}
-                      onChange={(e) => {
-                        const newEnabled = new Set(enabledTargets);
-                        if (e.target.checked) {
-                          newEnabled.add(target);
-                        } else {
-                          newEnabled.delete(target);
-                          // 如果取消勾选，同时取消选中该target的项目
-                          setSelectedIndexesFiltered(prev => {
-                            return prev.filter(idx => {
-                              const t = transforms[idx];
-                              return t.target !== target;
-                            });
-                          });
-                        }
-                        // 创建新的 Set 对象以触发 React 重新渲染
-                        setEnabledTargets(new Set(newEnabled));
-                      }}
-                      style={{ marginRight: "6px", cursor: "pointer" }}
-                    />
                     <span style={{ 
-                      color: isBg ? "#e74c3c" : "#333",
-                      fontWeight: isBg ? "bold" : "normal"
-                    }}>
-                      {target}
-                    </span>
-                  </label>
+                      width: "8px", 
+                      height: "8px", 
+                      borderRadius: "50%", 
+                      background: dotColor 
+                    }} />
+                    {target}
+                  </button>
                 );
               });
             })()}
