@@ -122,6 +122,7 @@ export default function TransformEditor() {
   const [selectedGameFolder, setSelectedGameFolder] = useState<string | null>(null);
   const [availableFigures, setAvailableFigures] = useState<string[]>([]);
   const [availableBackgrounds, setAvailableBackgrounds] = useState<string[]>([]);
+  const [loadAllWebgalAssets, setLoadAllWebgalAssets] = useState(true);
 
   // 可编辑的 output script
   const [outputScriptLines, setOutputScriptLines] = useState<string[]>([]);
@@ -151,23 +152,34 @@ export default function TransformEditor() {
   }
 
   // WebGAL 模式处理函数
+  const syncWebGALFolder = async (folderPath: string, shouldLoadAllAssets: boolean) => {
+    await webgalFileManager.setGameFolder(folderPath, shouldLoadAllAssets);
+    setAvailableFigures(webgalFileManager.getFigureFiles());
+    setAvailableBackgrounds(webgalFileManager.getBackgroundFiles());
+  };
+
   const handleGameFolderSelect = async (folderPath: string | null) => {
     if (folderPath === null) {
       // 取消选择
       setSelectedGameFolder(null);
       setAvailableFigures([]);
       setAvailableBackgrounds([]);
-      // 可以在这里清理 webgalFileManager 的状态，如果有相关方法的话
+      webgalFileManager.dispose();
       return;
     }
     
     setSelectedGameFolder(folderPath);
-    await webgalFileManager.setGameFolder(folderPath);
-    
-    setTimeout(() => {
-      setAvailableFigures(webgalFileManager.getFigureFiles());
-      setAvailableBackgrounds(webgalFileManager.getBackgroundFiles());
-    }, 500);
+    await syncWebGALFolder(folderPath, loadAllWebgalAssets);
+  };
+
+  const handleLoadAllAssetsChange = async (shouldLoadAllAssets: boolean) => {
+    setLoadAllWebgalAssets(shouldLoadAllAssets);
+
+    if (!selectedGameFolder) {
+      return;
+    }
+
+    await syncWebGALFolder(selectedGameFolder, shouldLoadAllAssets);
   };
 
   // ⌨️ 方向键移动逻辑
@@ -464,6 +476,20 @@ export default function TransformEditor() {
         }
       }
     }
+  };
+
+  const loadScriptAssetsInBackground = (script: string) => {
+    if (!selectedGameFolder || !script.trim()) {
+      return;
+    }
+
+    void parseAndLoadImages(script)
+      .then(() => {
+        setTransforms(prev => [...prev]);
+      })
+      .catch((error) => {
+        console.error("❌ 后台加载 WebGAL 资源失败:", error);
+      });
   };
 
   // 真正的动画播放功能
@@ -1076,13 +1102,9 @@ export default function TransformEditor() {
                   // 应用 figureID 系统
                   const merged = applyFigureIDSystem(parsed);
 
-                  // 如果启用了 WebGAL 模式，自动加载图片
-                  if (selectedGameFolder && scriptToBreakpoint.trim()) {
-                    await parseAndLoadImages(scriptToBreakpoint);
-                  }
-
                   // 更新 transforms（只包含断点之前的内容）
                   setTransforms(merged);
+                  loadScriptAssetsInBackground(scriptToBreakpoint);
 
                   // 手动更新脚本输出窗口，确保发送完整脚本
                   setTimeout(() => {
@@ -1109,11 +1131,8 @@ export default function TransformEditor() {
 
                     const merged = applyFigureIDSystem(parsed);
 
-                    if (selectedGameFolder && fullScript.trim()) {
-                      await parseAndLoadImages(fullScript);
-                    }
-
                     setTransforms(merged);
+                    loadScriptAssetsInBackground(fullScript);
 
                     // 手动更新脚本输出窗口，确保发送完整脚本
                     setTimeout(() => {
@@ -1586,9 +1605,11 @@ export default function TransformEditor() {
       <WebGALMode
         onFolderSelect={handleGameFolderSelect}
         onFileSelect={handleFileSelect}
+        onLoadAllAssetsChange={handleLoadAllAssetsChange}
         selectedFolder={selectedGameFolder}
         availableFigures={availableFigures}
         availableBackgrounds={availableBackgrounds}
+        loadAllAssets={loadAllWebgalAssets}
       />
       <br />
              <button
@@ -1614,13 +1635,9 @@ export default function TransformEditor() {
              }
            }
           
-          // 如果启用了 WebGAL 模式，自动加载图片
-          if (selectedGameFolder) {
-            await parseAndLoadImages(input);
-          }
-          
           // 保存合并后的 transforms（用于渲染）
           setTransforms(merged);
+          loadScriptAssetsInBackground(input);
            setAllSelected(false);
            setSelectedIndexes([]);
 

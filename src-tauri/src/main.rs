@@ -504,13 +504,69 @@ fn scan_directory_recursive(dir_path: String) -> Result<Vec<String>, String> {
     Ok(files)
 }
 
+#[tauri::command]
+fn find_file_recursive(dir_path: String, target: String) -> Result<Option<String>, String> {
+    let base_dir = Path::new(&dir_path);
+
+    if !base_dir.exists() {
+        return Err(format!("路径不存在: {}", dir_path));
+    }
+
+    if !base_dir.is_dir() {
+        return Err(format!("路径不是目录: {}", dir_path));
+    }
+
+    let normalized_target = target.replace('\\', "/").trim_start_matches('/').to_string();
+    if normalized_target.is_empty() {
+        return Ok(None);
+    }
+
+    let direct_path = base_dir.join(&normalized_target);
+    if direct_path.exists() && direct_path.is_file() {
+        return Ok(Some(normalized_target));
+    }
+
+    fn walk_dir(dir: &Path, base_dir: &Path, target: &str) -> Result<Option<String>, String> {
+        for entry in fs::read_dir(dir).map_err(|e| format!("读取目录失败: {}", e))? {
+            let entry = entry.map_err(|e| format!("读取条目失败: {}", e))?;
+            let path = entry.path();
+
+            if path.is_dir() {
+                if let Some(found) = walk_dir(&path, base_dir, target)? {
+                    return Ok(Some(found));
+                }
+                continue;
+            }
+
+            if !path.is_file() {
+                continue;
+            }
+
+            let relative_path = path
+                .strip_prefix(base_dir)
+                .map_err(|e| format!("计算相对路径失败: {}", e))?
+                .to_string_lossy()
+                .replace('\\', "/");
+
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            if relative_path == target || relative_path.ends_with(&format!("/{}", target)) || file_name == target {
+                return Ok(Some(relative_path));
+            }
+        }
+
+        Ok(None)
+    }
+
+    walk_dir(base_dir, base_dir, &normalized_target)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_log::Builder::default().build())
-        .invoke_handler(tauri::generate_handler![get_asset_path, scan_directory_recursive, start_local_server, open_filter_editor_window, open_script_output_window, extract_jsonl_motions_expressions])
+        .invoke_handler(tauri::generate_handler![get_asset_path, scan_directory_recursive, find_file_recursive, start_local_server, open_filter_editor_window, open_script_output_window, extract_jsonl_motions_expressions])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

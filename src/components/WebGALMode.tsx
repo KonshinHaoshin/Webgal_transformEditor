@@ -3,17 +3,21 @@ import { useState } from 'react';
 interface WebGALModeProps {
     onFolderSelect: (folderPath: string | null) => void;
     onFileSelect: (type: 'figure' | 'background', filename: string) => void;
+    onLoadAllAssetsChange: (shouldLoad: boolean) => void;
     selectedFolder: string | null;
     availableFigures: string[];
     availableBackgrounds: string[];
+    loadAllAssets: boolean;
 }
 
 export default function WebGALMode({ 
     onFolderSelect, 
     onFileSelect, 
+    onLoadAllAssetsChange,
     selectedFolder, 
     availableFigures, 
-    availableBackgrounds 
+    availableBackgrounds,
+    loadAllAssets
 }: WebGALModeProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const [figureSearch, setFigureSearch] = useState("");
@@ -74,6 +78,16 @@ export default function WebGALMode({
                     />
                     WebGAL模式
                 </label>
+
+                <label style={{ fontSize: '12px', color: '#555' }}>
+                    <input
+                        type="checkbox"
+                        checked={loadAllAssets}
+                        onChange={(e) => onLoadAllAssetsChange(e.target.checked)}
+                        style={{ marginRight: '4px' }}
+                    />
+                    加载全部资源列表
+                </label>
                 
                 {selectedFolder && (
                     <button 
@@ -96,6 +110,11 @@ export default function WebGALMode({
             {selectedFolder && (
                 <div style={{ marginTop: '10px', fontSize: '12px', color: '#666' }}>
                     已选择文件夹: {selectedFolder}
+                    {!loadAllAssets && (
+                        <div style={{ marginTop: '4px', color: '#8a5a00' }}>
+                            当前为按需查找模式，不预先扫描全部立绘/背景。脚本导入时会自动递归查找引用资源。
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -128,7 +147,11 @@ export default function WebGALMode({
                             gridTemplateColumns: '1fr 1fr',
                             gap: '4px'
                         }}>
-                            {filteredFigures.length > 0 ? (
+                            {!loadAllAssets ? (
+                                <div style={{ color: '#999', gridColumn: 'span 2', textAlign: 'center' }}>
+                                    已关闭全量索引，开启“加载全部资源列表”后可浏览全部立绘
+                                </div>
+                            ) : filteredFigures.length > 0 ? (
                                 filteredFigures.map((file, index) => (
                                     <div 
                                         key={index}
@@ -183,7 +206,11 @@ export default function WebGALMode({
                             gridTemplateColumns: '1fr 1fr',
                             gap: '4px'
                         }}>
-                            {filteredBackgrounds.length > 0 ? (
+                            {!loadAllAssets ? (
+                                <div style={{ color: '#999', gridColumn: 'span 2', textAlign: 'center' }}>
+                                    已关闭全量索引，开启“加载全部资源列表”后可浏览全部背景
+                                </div>
+                            ) : filteredBackgrounds.length > 0 ? (
                                 filteredBackgrounds.map((file, index) => (
                                     <div 
                                         key={index}

@@ -8,6 +8,10 @@ export class WebGALFileManager {
     private figureFiles: string[] = [];
     private backgroundFiles: string[] = [];
     private fileServerBaseUrl: string | null = null;
+    private shouldLoadAssetIndex = true;
+    private blobUrlCache: Map<string, string> = new Map();
+    private resolvedFigurePathCache: Map<string, string> = new Map();
+    private resolvedBackgroundPathCache: Map<string, string> = new Map();
 
     async selectGameFolder(): Promise<string | null> {
         try {
@@ -30,8 +34,21 @@ export class WebGALFileManager {
         return null;
     }
 
-    async setGameFolder(folderPath: string): Promise<void> {
+    async setGameFolder(folderPath: string, shouldLoadAssetIndex: boolean = true): Promise<void> {
+        const folderChanged = this.gameFolder !== folderPath;
         this.gameFolder = folderPath;
+        this.shouldLoadAssetIndex = shouldLoadAssetIndex;
+
+        if (folderChanged) {
+            this.figureFiles = [];
+            this.backgroundFiles = [];
+            this.resolvedFigurePathCache.clear();
+            this.resolvedBackgroundPathCache.clear();
+            this.revokeAllBlobUrls();
+        } else if (!this.shouldLoadAssetIndex) {
+            this.figureFiles = [];
+            this.backgroundFiles = [];
+        }
         
         // 启动本地文件服务器
         try {
@@ -42,7 +59,11 @@ export class WebGALFileManager {
             console.error('启动文件服务器失败:', error);
         }
         
-        await this.scanFiles();
+        if (this.shouldLoadAssetIndex) {
+            this.figureFiles = [];
+            this.backgroundFiles = [];
+            await this.scanFiles();
+        }
     }
 
     private async scanFiles(): Promise<void> {
@@ -89,11 +110,7 @@ export class WebGALFileManager {
         const queryParams = queryIndex !== -1 ? filename.substring(queryIndex) : '';
         
         // 查找匹配的文件（支持子目录路径）
-        const found = this.figureFiles.find(f => 
-            f === cleanFilename || 
-            f.endsWith(cleanFilename) || 
-            f.endsWith(`/${cleanFilename}`)
-        );
+        const found = await this.resolveAssetPath('figure', cleanFilename);
         
         if (!found) {
             console.warn(`找不到立绘文件: ${filename}，可用文件列表:`, this.figureFiles);
@@ -120,12 +137,11 @@ export class WebGALFileManager {
     async getBackgroundPath(filename: string): Promise<string | null> {
         if (!this.gameFolder) return null;
         
-        // 查找匹配的文件（支持子目录路径）
-        const found = this.backgroundFiles.find(f => 
-            f === filename || 
-            f.endsWith(filename) || 
-            f.endsWith(`/${filename}`)
-        );
+        // 剥离查询参数以进行文件匹配
+        const queryIndex = filename.indexOf('?');
+        const cleanFilename = queryIndex !== -1 ? filename.substring(0, queryIndex) : filename;
+
+        const found = await this.resolveAssetPath('background', cleanFilename);
         
         if (!found) {
             console.warn(`找不到背景文件: ${filename}，可用文件列表:`, this.backgroundFiles);
@@ -139,6 +155,11 @@ export class WebGALFileManager {
         try {
             const folderPath = type === 'figure' ? 'figure' : 'background';
             const filePath = `${this.gameFolder}/game/${folderPath}/${filename}`;
+
+            const cachedBlobUrl = this.blobUrlCache.get(filePath);
+            if (cachedBlobUrl) {
+                return cachedBlobUrl;
+            }
             
             console.log('正在使用fs+Blob读取文件:', filePath);
             
@@ -149,6 +170,7 @@ export class WebGALFileManager {
             });
             
             const blobUrl = URL.createObjectURL(blob);
+            this.blobUrlCache.set(filePath, blobUrl);
             console.log('成功创建Blob URL:', blobUrl);
             
             return blobUrl;
@@ -175,6 +197,10 @@ export class WebGALFileManager {
         return this.gameFolder;
     }
 
+    getShouldLoadAssetIndex(): boolean {
+        return this.shouldLoadAssetIndex;
+    }
+
     // 公开 gameFolder 属性供其他模块访问
     get gameFolderPath(): string | null {
         return this.gameFolder;
@@ -188,6 +214,69 @@ export class WebGALFileManager {
     parseChangeBackgroundCommand(command: string): string | null {
         const match = command.match(/changeBackground:\s*([^\s,]+)/i);
         return match ? match[1] : null;
+    }
+
+    dispose(): void {
+        this.gameFolder = null;
+        this.figureFiles = [];
+        this.backgroundFiles = [];
+        this.fileServerBaseUrl = null;
+        this.shouldLoadAssetIndex = true;
+        this.resolvedFigurePathCache.clear();
+        this.resolvedBackgroundPathCache.clear();
+        this.revokeAllBlobUrls();
+    }
+
+    private async resolveAssetPath(type: 'figure' | 'background', filename: string): Promise<string | null> {
+        if (!this.gameFolder) {
+            return null;
+        }
+
+        const normalizedFilename = filename.replace(/\\/g, '/');
+        const fileList = type === 'figure' ? this.figureFiles : this.backgroundFiles;
+        const cache = type === 'figure' ? this.resolvedFigurePathCache : this.resolvedBackgroundPathCache;
+
+        const cachedResolvedPath = cache.get(normalizedFilename);
+        if (cachedResolvedPath) {
+            return cachedResolvedPath;
+        }
+
+        const foundInIndex = fileList.find(f =>
+            f === normalizedFilename ||
+            f.endsWith(normalizedFilename) ||
+            f.endsWith(`/${normalizedFilename}`)
+        );
+        if (foundInIndex) {
+            cache.set(normalizedFilename, foundInIndex);
+            return foundInIndex;
+        }
+
+        const folderPath = `${this.gameFolder}/game/${type}`;
+        try {
+            const found = await invoke<string | null>('find_file_recursive', {
+                dirPath: folderPath,
+                target: normalizedFilename
+            });
+
+            if (found) {
+                cache.set(normalizedFilename, found);
+                if (!fileList.includes(found)) {
+                    fileList.push(found);
+                }
+                return found;
+            }
+        } catch (error) {
+            console.warn(`按需查找${type}文件失败:`, error);
+        }
+
+        return null;
+    }
+
+    private revokeAllBlobUrls(): void {
+        for (const blobUrl of this.blobUrlCache.values()) {
+            URL.revokeObjectURL(blobUrl);
+        }
+        this.blobUrlCache.clear();
     }
 }
 
