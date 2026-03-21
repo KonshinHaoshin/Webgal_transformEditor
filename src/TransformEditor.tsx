@@ -123,6 +123,11 @@ export default function TransformEditor() {
   const [availableFigures, setAvailableFigures] = useState<string[]>([]);
   const [availableBackgrounds, setAvailableBackgrounds] = useState<string[]>([]);
   const [loadAllWebgalAssets, setLoadAllWebgalAssets] = useState(true);
+  const loadedFigurePathsRef = useRef<Map<string, string>>(new Map());
+  const loadedBackgroundPathRef = useRef<string | null>(null);
+  const desiredFigurePathsRef = useRef<Map<string, string>>(new Map());
+  const desiredBackgroundPathRef = useRef<string | null>(null);
+  const assetSyncVersionRef = useRef(0);
 
   // 可编辑的 output script
   const [outputScriptLines, setOutputScriptLines] = useState<string[]>([]);
@@ -164,8 +169,23 @@ export default function TransformEditor() {
       setSelectedGameFolder(null);
       setAvailableFigures([]);
       setAvailableBackgrounds([]);
+      loadedFigurePathsRef.current.clear();
+      loadedBackgroundPathRef.current = null;
+      desiredFigurePathsRef.current.clear();
+      desiredBackgroundPathRef.current = null;
+      assetSyncVersionRef.current += 1;
       webgalFileManager.dispose();
       return;
+    }
+
+    if (selectedGameFolder && selectedGameFolder !== folderPath) {
+      figureManager.removeAllFigures();
+      loadedFigurePathsRef.current.clear();
+      loadedBackgroundPathRef.current = null;
+      desiredFigurePathsRef.current.clear();
+      desiredBackgroundPathRef.current = null;
+      assetSyncVersionRef.current += 1;
+      setBgImg(null);
     }
     
     setSelectedGameFolder(folderPath);
@@ -180,6 +200,73 @@ export default function TransformEditor() {
     }
 
     await syncWebGALFolder(selectedGameFolder, shouldLoadAllAssets);
+  };
+
+  const loadFigureAsset = async (targetKey: string, figurePath: string, syncVersion?: number) => {
+    const fileUrl = await webgalFileManager.getFigurePath(figurePath);
+    if (!fileUrl) {
+      console.warn(`无法获取立绘路径: ${figurePath}`);
+      figureManager.removeFigure(targetKey);
+      loadedFigurePathsRef.current.delete(targetKey);
+      return;
+    }
+
+    try {
+      const figure = await figureManager.addFigure(targetKey, fileUrl, figurePath);
+      if (!figure) {
+        throw new Error(`figureManager 未返回资源: ${figurePath}`);
+      }
+
+      const isStale =
+        syncVersion !== undefined &&
+        (assetSyncVersionRef.current !== syncVersion ||
+          desiredFigurePathsRef.current.get(targetKey) !== figurePath);
+
+      if (isStale) {
+        figureManager.removeFigure(targetKey);
+        return;
+      }
+
+      loadedFigurePathsRef.current.set(targetKey, figurePath);
+    } catch (error) {
+      console.error(`❌ 加载立绘失败: ${figurePath}`, error);
+      figureManager.removeFigure(targetKey);
+      loadedFigurePathsRef.current.delete(targetKey);
+      throw error;
+    }
+  };
+
+  const loadBackgroundAsset = async (backgroundPath: string, syncVersion?: number) => {
+    const fileUrl = await webgalFileManager.getBackgroundPath(backgroundPath);
+    if (!fileUrl) {
+      console.warn(`无法获取背景路径: ${backgroundPath}`);
+      loadedBackgroundPathRef.current = null;
+      setBgImg(null);
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const isStale =
+          syncVersion !== undefined &&
+          (assetSyncVersionRef.current !== syncVersion ||
+            desiredBackgroundPathRef.current !== backgroundPath);
+
+        if (!isStale) {
+          setBgImg(img);
+          loadedBackgroundPathRef.current = backgroundPath;
+        }
+        resolve();
+      };
+      img.onerror = () => reject(new Error(`背景图片加载失败: ${backgroundPath}`));
+      img.src = fileUrl;
+    }).catch((error) => {
+      console.error(`❌ 加载背景失败: ${backgroundPath}`, error);
+      loadedBackgroundPathRef.current = null;
+      setBgImg(null);
+      throw error;
+    });
   };
 
   // ⌨️ 方向键移动逻辑
@@ -267,13 +354,6 @@ export default function TransformEditor() {
   }, [selectedIndexes, breakpoints]);
 
   const handleFileSelect = async (type: 'figure' | 'background', filename: string) => {
-    // 获取文件路径（可能是 blob URL 或 HTTP URL）
-    const fileUrl = await webgalFileManager[type === 'figure' ? 'getFigurePath' : 'getBackgroundPath'](filename);
-    if (!fileUrl) {
-      console.warn(`无法获取文件路径: ${filename}`);
-      return;
-    }
-
     // 确定完整文件路径（用于脚本导出）
     let filePath = filename;
     if (type === 'figure') {
@@ -311,7 +391,7 @@ export default function TransformEditor() {
         
         try {
           // 先加载模型
-          await figureManager.addFigure(figureId, fileUrl, finalPath);
+          await loadFigureAsset(figureId, finalPath);
           console.log(`✅ 模型加载成功: ${filename}`);
           
           // 加载完成后再添加到 transforms
@@ -337,59 +417,29 @@ export default function TransformEditor() {
           alert(`模型加载失败: ${error}`);
         }
       } else {
-        // 普通图片：也通过 figureManager 加载，不设置全局 modelImg
-        const img = new Image();
-        img.onload = async () => {
-          console.log(`✅ 已加载立绘: ${filename}`);
-          
-          try {
-            // 使用 figureManager 加载图片
-            await figureManager.addFigure(figureId, fileUrl, filePath);
-            
-            // 加载完成后再添加到 transforms
-            setTransforms(prev => {
-              const newChangeFigure: TransformData = {
-                type: "changeFigure",
-                path: filePath,
-                target: figureId,
-                duration: 0,
-                transform: {
-                  position: { x: 0, y: 0 },
-                  scale: { x: 1, y: 1 }
-                },
-                presetPosition: 'center',
-                extraParams: {}
-              };
-              const newTransforms = [...prev, newChangeFigure];
-              setSelectedIndexes([prev.length]);
-              return newTransforms;
-            });
-          } catch (error) {
-            console.error(`❌ 图片加载到 figureManager 失败: ${filename}`, error);
-            // 即使失败也添加 transform，让渲染器回退到其他方式
-            setTransforms(prev => {
-              const newChangeFigure: TransformData = {
-                type: "changeFigure",
-                path: filePath,
-                target: figureId,
-                duration: 0,
-                transform: {
-                  position: { x: 0, y: 0 },
-                  scale: { x: 1, y: 1 }
-                },
-                presetPosition: 'center',
-                extraParams: {}
-              };
-              const newTransforms = [...prev, newChangeFigure];
-              setSelectedIndexes([prev.length]);
-              return newTransforms;
-            });
-          }
-        };
-        img.onerror = () => {
-          console.error(`❌ 图片加载失败: ${filename}`);
-        };
-        img.src = fileUrl;
+        try {
+          await loadFigureAsset(figureId, filePath);
+        } catch (error) {
+          console.error(`❌ 图片加载到 figureManager 失败: ${filename}`, error);
+        }
+
+        setTransforms(prev => {
+          const newChangeFigure: TransformData = {
+            type: "changeFigure",
+            path: filePath,
+            target: figureId,
+            duration: 0,
+            transform: {
+              position: { x: 0, y: 0 },
+              scale: { x: 1, y: 1 }
+            },
+            presetPosition: 'center',
+            extraParams: {}
+          };
+          const newTransforms = [...prev, newChangeFigure];
+          setSelectedIndexes([prev.length]);
+          return newTransforms;
+        });
       }
     } else {
       // 背景文件（通常不会是 json/jsonl，但为了安全也检查一下）
@@ -397,100 +447,85 @@ export default function TransformEditor() {
         console.warn(`⚠️ 背景文件不支持 Live2D 格式: ${filename}`);
         return;
       }
-      
-      const img = new Image();
-      img.onload = () => {
-        setBgImg(img);
-        console.log(`✅ 已加载背景: ${filename}`);
-        
-        // 添加到 transforms 数组
-        setTransforms(prev => {
-          const newChangeBg: TransformData = {
-            type: "changeBg",
-            path: filePath,
-            target: "bg-main",
-            duration: 0,
-            transform: {
-              position: { x: 0, y: 0 },
-              scale: { x: 1, y: 1 }
-            },
-            extraParams: {}
-          };
-          const newTransforms = [...prev, newChangeBg];
-          setSelectedIndexes([prev.length]);
-          return newTransforms;
-        });
-      };
-      img.onerror = () => {
-        console.error(`❌ 背景图片加载失败: ${filename}`);
-      };
-      img.src = fileUrl;
+
+      try {
+        await loadBackgroundAsset(filePath);
+      } catch (error) {
+        console.error(`❌ 背景图片加载失败: ${filename}`, error);
+      }
+
+      // 添加到 transforms 数组
+      setTransforms(prev => {
+        const newChangeBg: TransformData = {
+          type: "changeBg",
+          path: filePath,
+          target: "bg-main",
+          duration: 0,
+          transform: {
+            position: { x: 0, y: 0 },
+            scale: { x: 1, y: 1 }
+          },
+          extraParams: {}
+        };
+        const newTransforms = [...prev, newChangeBg];
+        setSelectedIndexes([prev.length]);
+        return newTransforms;
+      });
     }
   };
 
-  const parseAndLoadImages = async (script: string) => {
-    if (!selectedGameFolder) return;
-
-    const lines = script.split(";").map(line => line.trim()).filter(Boolean);
-    
-    for (const line of lines) {
-      const figureMatch = line.match(/changeFigure:\s*([^\s,]+)/i);
-      if (figureMatch) {
-        const filename = figureMatch[1];
-        console.log(`🔍 检测到 changeFigure 命令: ${filename}`);
-        
-        // 解析 target (id)
-        const idMatch = line.match(/-id=([^\s,]+)/i);
-        const targetKey = idMatch ? idMatch[1] : filename;
-        
-        const blobUrl = await webgalFileManager.getFigurePath(filename);
-        if (blobUrl) {
-          // 传入原始文件路径以正确识别文件类型
-          const figure = await figureManager.addFigure(targetKey, blobUrl, filename);
-          if (figure) {
-            // 对于普通图片，设置 modelImg
-            if (figure.rawImage && !modelImg) {
-              setModelImg(figure.rawImage);
-            }
-            console.log(`✅ 自动加载立绘: ${filename} -> ${targetKey} (${figure.sourceType})`);
-          }
-        } else {
-          console.warn(`⚠️ 找不到立绘文件: ${filename}`);
-        }
-      }
-
-      const bgMatch = line.match(/changeBackground:\s*([^\s,]+)/i) || line.match(/changeBg:\s*([^\s,]+)/i);
-      if (bgMatch) {
-        const filename = bgMatch[1];
-        console.log(`🔍 检测到背景切换命令: ${filename}`);
-        const blobUrl = await webgalFileManager.getBackgroundPath(filename);
-        if (blobUrl) {
-          const img = new Image();
-          img.onload = () => {
-            setBgImg(img);
-            console.log(`✅ 自动加载背景: ${filename}`);
-          };
-          img.src = blobUrl;
-        } else {
-          console.warn(`⚠️ 找不到背景文件: ${filename}`);
-        }
-      }
-    }
-  };
-
-  const loadScriptAssetsInBackground = (script: string) => {
-    if (!selectedGameFolder || !script.trim()) {
+  useEffect(() => {
+    if (!selectedGameFolder) {
+      desiredFigurePathsRef.current = new Map();
+      desiredBackgroundPathRef.current = null;
       return;
     }
 
-    void parseAndLoadImages(script)
-      .then(() => {
-        setTransforms(prev => [...prev]);
-      })
-      .catch((error) => {
-        console.error("❌ 后台加载 WebGAL 资源失败:", error);
+    const nextFigurePaths = new Map<string, string>();
+    let nextBackgroundPath: string | null = null;
+
+    for (let i = transforms.length - 1; i >= 0; i--) {
+      const transform = transforms[i];
+      if (transform.type === "changeFigure" && transform.target && transform.path && !nextFigurePaths.has(transform.target)) {
+        nextFigurePaths.set(transform.target, transform.path);
+      } else if (transform.type === "changeBg" && transform.path && nextBackgroundPath === null) {
+        nextBackgroundPath = transform.path;
+      }
+    }
+
+    desiredFigurePathsRef.current = nextFigurePaths;
+    desiredBackgroundPathRef.current = nextBackgroundPath;
+
+    const syncVersion = ++assetSyncVersionRef.current;
+
+    for (const [target, loadedPath] of Array.from(loadedFigurePathsRef.current.entries())) {
+      if (nextFigurePaths.get(target) !== loadedPath) {
+        figureManager.removeFigure(target);
+        loadedFigurePathsRef.current.delete(target);
+      }
+    }
+
+    if (loadedBackgroundPathRef.current !== nextBackgroundPath) {
+      loadedBackgroundPathRef.current = null;
+      setBgImg(null);
+    }
+
+    for (const [target, path] of nextFigurePaths.entries()) {
+      if (loadedFigurePathsRef.current.get(target) === path) {
+        continue;
+      }
+
+      void loadFigureAsset(target, path, syncVersion).catch((error) => {
+        console.error(`❌ 脚本增量同步立绘失败: ${target} -> ${path}`, error);
       });
-  };
+    }
+
+    if (nextBackgroundPath && loadedBackgroundPathRef.current !== nextBackgroundPath) {
+      void loadBackgroundAsset(nextBackgroundPath, syncVersion).catch((error) => {
+        console.error(`❌ 脚本增量同步背景失败: ${nextBackgroundPath}`, error);
+      });
+    }
+  }, [transforms, selectedGameFolder]);
 
   // 真正的动画播放功能
   const playAnimation = () => {
@@ -1104,7 +1139,6 @@ export default function TransformEditor() {
 
                   // 更新 transforms（只包含断点之前的内容）
                   setTransforms(merged);
-                  loadScriptAssetsInBackground(scriptToBreakpoint);
 
                   // 手动更新脚本输出窗口，确保发送完整脚本
                   setTimeout(() => {
@@ -1132,7 +1166,6 @@ export default function TransformEditor() {
                     const merged = applyFigureIDSystem(parsed);
 
                     setTransforms(merged);
-                    loadScriptAssetsInBackground(fullScript);
 
                     // 手动更新脚本输出窗口，确保发送完整脚本
                     setTimeout(() => {
@@ -1637,7 +1670,6 @@ export default function TransformEditor() {
           
           // 保存合并后的 transforms（用于渲染）
           setTransforms(merged);
-          loadScriptAssetsInBackground(input);
            setAllSelected(false);
            setSelectedIndexes([]);
 
