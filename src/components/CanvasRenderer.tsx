@@ -35,6 +35,7 @@ interface Props {
     outputScriptLines?: string[]; // 当前的输出脚本行
     // mygo3Mode?: boolean; // MyGO!!!!! 3.0 模式 (已弃用)
     positioningType?: 'M_2_3' | 'M_2_4' | 'M_3_0_0' | 'M_3_1_0'; // 立绘定位系统
+    figureLoadVersion?: number; // 立绘异步加载版本号，变化时触发重绘
 }
 
 export default function CanvasRenderer(props: Props) {
@@ -54,7 +55,8 @@ export default function CanvasRenderer(props: Props) {
         animationStateRef,
         breakpoints = new Set(),
         // mygo3Mode = false,
-        positioningType = 'M_2_4'
+        positioningType = 'M_2_4',
+        figureLoadVersion = 0,
         // fullOutputScriptLines 和 outputScriptLines 暂时未使用，但保留在 Props 接口中以便将来使用
     } = props;
     
@@ -687,7 +689,7 @@ export default function CanvasRenderer(props: Props) {
         return () => {
             canvas.removeEventListener("wheel", handleWheel);
         };
-    }, [canvasRef.current, transforms, bgImg, modelImg, selectedIndexes, overlayMode, breakpoints, canvasWidth, canvasHeight, scaleX, scaleY, modelOriginalWidth, modelOriginalHeight, setTransforms]); // 👈 包含所有依赖项
+    }, [canvasRef.current, transforms, bgImg, modelImg, selectedIndexes, overlayMode, breakpoints, canvasWidth, canvasHeight, scaleX, scaleY, modelOriginalWidth, modelOriginalHeight, setTransforms, figureLoadVersion]); // 👈 包含所有依赖项
 
     useEffect(() => {
         if (!appRef.current) return;

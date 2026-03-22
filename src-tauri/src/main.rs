@@ -280,20 +280,22 @@ fn extract_jsonl_motions_expressions(file_path: String, game_folder: Option<Stri
 }
 
 #[tauri::command]
-fn scan_directory_recursive(dir_path: String) -> Result<Vec<String>, String> {
-    let path = Path::new(&dir_path);
-    
+async fn scan_directory_recursive(dir_path: String) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || {
+    let path_buf = std::path::PathBuf::from(&dir_path);
+    let path = path_buf.as_path();
+
     if !path.exists() {
         return Err(format!("路径不存在: {}", dir_path));
     }
-    
+
     if !path.is_dir() {
         return Err(format!("路径不是目录: {}", dir_path));
     }
-    
+
     let mut files = Vec::new();
     let mut excluded_files = std::collections::HashSet::new();
-    
+
     fn walk_dir(dir: &Path, base_dir: &Path, files: &mut Vec<String>, excluded_files: &mut std::collections::HashSet<String>) -> Result<(), String> {
         // 先收集并排序：确保 jsonl/json 先于 png 等被处理，从而先填充 excluded_files
         let mut entries: Vec<std::path::PathBuf> = Vec::new();
@@ -500,13 +502,16 @@ fn scan_directory_recursive(dir_path: String) -> Result<Vec<String>, String> {
         Ok(())
     }
     
-    walk_dir(path, path, &mut files, &mut excluded_files)?;
+    walk_dir(path_buf.as_path(), path_buf.as_path(), &mut files, &mut excluded_files)?;
     Ok(files)
+    }).await.map_err(|e| format!("任务执行失败: {}", e))?
 }
 
 #[tauri::command]
-fn find_file_recursive(dir_path: String, target: String) -> Result<Option<String>, String> {
-    let base_dir = Path::new(&dir_path);
+async fn find_file_recursive(dir_path: String, target: String) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+    let base_dir_buf = std::path::PathBuf::from(&dir_path);
+    let base_dir = base_dir_buf.as_path();
 
     if !base_dir.exists() {
         return Err(format!("路径不存在: {}", dir_path));
@@ -557,7 +562,8 @@ fn find_file_recursive(dir_path: String, target: String) -> Result<Option<String
         Ok(None)
     }
 
-    walk_dir(base_dir, base_dir, &normalized_target)
+    walk_dir(base_dir_buf.as_path(), base_dir_buf.as_path(), &normalized_target)
+    }).await.map_err(|e| format!("任务执行失败: {}", e))?
 }
 
 fn main() {

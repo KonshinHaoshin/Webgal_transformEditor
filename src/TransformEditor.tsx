@@ -123,6 +123,8 @@ export default function TransformEditor() {
   const [availableFigures, setAvailableFigures] = useState<string[]>([]);
   const [availableBackgrounds, setAvailableBackgrounds] = useState<string[]>([]);
   const [loadAllWebgalAssets, setLoadAllWebgalAssets] = useState(true);
+  const [isScanning, setIsScanning] = useState(false);
+  const [figureLoadVersion, setFigureLoadVersion] = useState(0);
   const loadedFigurePathsRef = useRef<Map<string, string>>(new Map());
   const loadedBackgroundPathRef = useRef<string | null>(null);
   const desiredFigurePathsRef = useRef<Map<string, string>>(new Map());
@@ -158,9 +160,14 @@ export default function TransformEditor() {
 
   // WebGAL 模式处理函数
   const syncWebGALFolder = async (folderPath: string, shouldLoadAllAssets: boolean) => {
-    await webgalFileManager.setGameFolder(folderPath, shouldLoadAllAssets);
-    setAvailableFigures(webgalFileManager.getFigureFiles());
-    setAvailableBackgrounds(webgalFileManager.getBackgroundFiles());
+    setIsScanning(true);
+    try {
+      await webgalFileManager.setGameFolder(folderPath, shouldLoadAllAssets);
+      setAvailableFigures(webgalFileManager.getFigureFiles());
+      setAvailableBackgrounds(webgalFileManager.getBackgroundFiles());
+    } finally {
+      setIsScanning(false);
+    }
   };
 
   const handleGameFolderSelect = async (folderPath: string | null) => {
@@ -174,6 +181,7 @@ export default function TransformEditor() {
       desiredFigurePathsRef.current.clear();
       desiredBackgroundPathRef.current = null;
       assetSyncVersionRef.current += 1;
+      localStorage.removeItem('webgal-game-folder');
       webgalFileManager.dispose();
       return;
     }
@@ -189,6 +197,7 @@ export default function TransformEditor() {
     }
     
     setSelectedGameFolder(folderPath);
+    localStorage.setItem('webgal-game-folder', folderPath);
     await syncWebGALFolder(folderPath, loadAllWebgalAssets);
   };
 
@@ -268,6 +277,15 @@ export default function TransformEditor() {
       throw error;
     });
   };
+
+  // 🗂️ 应用启动时恢复上次选择的游戏目录
+  useEffect(() => {
+    const savedFolder = localStorage.getItem('webgal-game-folder');
+    if (savedFolder) {
+      handleGameFolderSelect(savedFolder);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ⌨️ 方向键移动逻辑
   useEffect(() => {
@@ -510,19 +528,28 @@ export default function TransformEditor() {
       setBgImg(null);
     }
 
+    const figureLoadPromises: Promise<void>[] = [];
+
     for (const [target, path] of nextFigurePaths.entries()) {
       if (loadedFigurePathsRef.current.get(target) === path) {
         continue;
       }
 
-      void loadFigureAsset(target, path, syncVersion).catch((error) => {
+      const p = loadFigureAsset(target, path, syncVersion).catch((error) => {
         console.error(`❌ 脚本增量同步立绘失败: ${target} -> ${path}`, error);
       });
+      figureLoadPromises.push(p);
     }
 
     if (nextBackgroundPath && loadedBackgroundPathRef.current !== nextBackgroundPath) {
       void loadBackgroundAsset(nextBackgroundPath, syncVersion).catch((error) => {
         console.error(`❌ 脚本增量同步背景失败: ${nextBackgroundPath}`, error);
+      });
+    }
+
+    if (figureLoadPromises.length > 0) {
+      Promise.all(figureLoadPromises).then(() => {
+        setFigureLoadVersion(v => v + 1);
       });
     }
   }, [transforms, selectedGameFolder]);
@@ -1643,6 +1670,7 @@ export default function TransformEditor() {
         availableFigures={availableFigures}
         availableBackgrounds={availableBackgrounds}
         loadAllAssets={loadAllWebgalAssets}
+        isScanning={isScanning}
       />
       <br />
              <button
@@ -2343,6 +2371,7 @@ export default function TransformEditor() {
           fullOutputScriptLines={fullOutputScriptLinesRef.current}
           outputScriptLines={outputScriptLines}
           positioningType={positioningType}
+          figureLoadVersion={figureLoadVersion}
         />
       </div>
 

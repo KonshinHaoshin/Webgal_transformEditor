@@ -8,16 +8,18 @@ interface WebGALModeProps {
     availableFigures: string[];
     availableBackgrounds: string[];
     loadAllAssets: boolean;
+    isScanning?: boolean;
 }
 
-export default function WebGALMode({ 
-    onFolderSelect, 
-    onFileSelect, 
+export default function WebGALMode({
+    onFolderSelect,
+    onFileSelect,
     onLoadAllAssetsChange,
-    selectedFolder, 
-    availableFigures, 
+    selectedFolder,
+    availableFigures,
     availableBackgrounds,
-    loadAllAssets
+    loadAllAssets,
+    isScanning = false
 }: WebGALModeProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const [figureSearch, setFigureSearch] = useState("");
@@ -71,12 +73,14 @@ export default function WebGALMode({
         }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <label>
-                    <input 
-                        type="checkbox" 
+                    <input
+                        type="checkbox"
                         checked={!!selectedFolder}
                         onChange={handleCheckboxChange}
+                        disabled={isScanning}
                     />
                     WebGAL模式
+                    {isScanning && <span style={{ marginLeft: '6px', fontSize: '12px', color: '#888' }}>扫描中...</span>}
                 </label>
 
                 <label style={{ fontSize: '12px', color: '#555' }}>
@@ -90,8 +94,9 @@ export default function WebGALMode({
                 </label>
                 
                 {selectedFolder && (
-                    <button 
+                    <button
                         onClick={() => setIsExpanded(!isExpanded)}
+                        disabled={isScanning}
                         style={{
                             padding: '4px 12px',
                             fontSize: '14px',
